@@ -1,9 +1,12 @@
 name: Deploy to GitHub Pages
 
+# Deploy from the feature branch only. The GitHub Pages environment permits
+# deployments from the repository's default branch (this feature branch); a
+# push to another branch (e.g. main) would build fine but fail the deploy on
+# the environment's branch policy, so it is intentionally not a trigger here.
 on:
   push:
     branches:
-      - main
       - claude/poker-outs-trainer-ue1fau
   workflow_dispatch:
 
@@ -13,10 +16,11 @@ permissions:
   pages: write
   id-token: write
 
-# Allow one concurrent deployment; newer pushes cancel in-progress runs.
+# One deployment at a time; don't cancel an in-progress deploy (avoids a
+# concurrent push cancelling the run that actually publishes the site).
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
