@@ -21,10 +21,47 @@ npm run build    # production build in dist/
 npm test         # verify the poker engine (36 assertions)
 ```
 
-The entire app is a **single self-contained React component**:
-[`src/UTHOutsTrainer.jsx`](src/UTHOutsTrainer.jsx). It contains an exact hand
-evaluator, the out-counting logic, all styling, and the full poker-table UI —
-the only import is React. Drop it into any React app.
+The core trainer is one component, [`src/UTHOutsTrainer.jsx`](src/UTHOutsTrainer.jsx)
+(exact hand evaluator, out-counting logic, all styling, the poker-table UI, the
+name gate, and the metrics page). The only extra module is
+[`src/metricsStore.js`](src/metricsStore.js), which handles the localStorage
+player profile and the optional shared metrics.
+
+## Players &amp; metrics (leaderboard)
+
+On first visit each player picks a **name**, saved forever in `localStorage` on
+their device. Every completed hand bumps their all-time count and last-played
+time. A player named **`aviv`** (case-insensitive) sees an extra **📊 Metrics**
+button that opens an admin page: totals for *players active in the last 24h* and
+*players all-time*, plus a **sortable table** (click any column) of each player's
+name, all-time hands, last-24h hands, and last-hand time.
+
+Because GitHub Pages is static and `localStorage` is per-device, cross-player
+aggregation needs a tiny shared datastore. This uses **Cloud Firestore** over
+its REST API (no SDK). Until you configure it the metrics page just shows the
+current device.
+
+### Enable cross-device metrics (one-time, ~5 min)
+
+1. Create a free project at <https://console.firebase.google.com>.
+2. **Build → Firestore Database → Create database** (Standard edition).
+3. **Rules** — allow the friends' leaderboard to read/write the `players`
+   collection, then Publish:
+   ```
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /players/{id} { allow read, write: if true; }
+     }
+   }
+   ```
+   (Open rules are fine for a small friends' app; anyone with the site can
+   write to `players`. Lock it down later with Firebase App Check if needed.)
+4. **Project settings → General → Your apps → Web app** — copy the
+   `projectId` and `apiKey` (both are safe to commit publicly).
+5. Paste them into the `FIREBASE` object at the top of
+   [`src/metricsStore.js`](src/metricsStore.js) and push. Done — the metrics
+   page now aggregates every player across devices.
 
 ## Modes
 

@@ -11,6 +11,9 @@
 //  import is React.
 // ============================================================================
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  loadProfile, createProfile, recordHand, fetchAllPlayers, isConfigured, DAY_MS,
+} from "./metricsStore.js";
 
 // ===========================================================================
 //  CARDS
@@ -306,7 +309,11 @@ function fmtTime(ms) {
 }
 
 export default function UTHOutsTrainer() {
-  const [mode, setMode] = useState("practice"); // 'practice' | 'manual'
+  const [mode, setMode] = useState("practice"); // 'practice' | 'manual' | 'metrics'
+
+  // player profile (name lives forever in localStorage)
+  const [profile, setProfile] = useState(() => loadProfile());
+  const isAviv = (profile?.name || "").trim().toLowerCase() === "aviv";
 
   // scenario
   const [scenario, setScenario] = useState(() => dealRandomScenario());
@@ -395,7 +402,8 @@ export default function UTHOutsTrainer() {
       timeSum: d.timeSum + dMs,
       points: d.points + earned,
     }));
-  }, [guess, truth, result, drillDone, handStart]);
+    if (profile) setProfile(recordHand(profile)); // all-time count + shared sync
+  }, [guess, truth, result, drillDone, handStart, profile]);
 
   const finishDrill = useCallback(() => setDrillDone(true), []);
   const startNewDrill = useCallback(() => {
@@ -525,6 +533,8 @@ export default function UTHOutsTrainer() {
   // =========================================================================
   return (
     <div className="uth-app">
+      {!profile && <NameGate onSubmit={(name) => setProfile(createProfile(name))} />}
+
       <header className="uth-topbar">
         <div className="uth-brand">
           <span className="uth-brand-mark">21</span>
@@ -546,10 +556,22 @@ export default function UTHOutsTrainer() {
           >
             Manual
           </button>
+          {isAviv && (
+            <button
+              className={`uth-modes-metrics ${mode === "metrics" ? "is-active" : ""}`}
+              onClick={() => setMode("metrics")}
+              title="Player metrics (admin)"
+            >
+              📊 Metrics
+            </button>
+          )}
+          {profile && <span className="uth-whoami" title="Your name (saved on this device)">{profile.name}</span>}
         </nav>
       </header>
 
-      {mode === "practice" ? (
+      {mode === "metrics" ? (
+        <MetricsPage me={profile} onBack={() => setMode("practice")} />
+      ) : mode === "practice" ? (
         <PracticeView
           scenario={scenario}
           dealKey={dealKey}
@@ -1079,6 +1101,178 @@ function CardPalette({ manualUsed, onAssign }) {
 }
 
 // ===========================================================================
+//  NAME GATE  (first visit — the name is stored forever in localStorage)
+// ===========================================================================
+function NameGate({ onSubmit }) {
+  const [name, setName] = useState("");
+  const ref = useRef(null);
+  useEffect(() => { ref.current?.focus(); }, []);
+  const submit = () => { if (name.trim()) onSubmit(name.trim().slice(0, 24)); };
+  return (
+    <div className="uth-gate">
+      <div className="uth-gate-card">
+        <span className="uth-brand-mark uth-gate-mark">21</span>
+        <h2>Welcome to the UTH Outs Trainer</h2>
+        <p>Pick a name to play under. It&rsquo;s saved on this device and shown on
+          the leaderboard.</p>
+        <input
+          ref={ref}
+          className="uth-gate-input"
+          placeholder="Your name"
+          maxLength={24}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+        />
+        <button className="uth-key uth-key--submit" disabled={!name.trim()} onClick={submit}>
+          Start playing &rarr;
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ===========================================================================
+//  METRICS PAGE  (admin — only "aviv" gets the button to reach it)
+// ===========================================================================
+function relTime(ts) {
+  if (!ts) return "never";
+  const d = Date.now() - ts;
+  if (d < 60e3) return "just now";
+  if (d < 3600e3) return `${Math.floor(d / 60e3)}m ago`;
+  if (d < 86400e3) return `${Math.floor(d / 3600e3)}h ago`;
+  const days = Math.floor(d / 86400e3);
+  return days === 1 ? "yesterday" : `${days}d ago`;
+}
+
+function MetricsPage({ me, onBack }) {
+  const [players, setPlayers] = useState([]);
+  const [state, setState] = useState("loading"); // loading | ok | error
+  const [err, setErr] = useState("");
+  const [sortKey, setSortKey] = useState("hands24");
+  const [sortDir, setSortDir] = useState("desc");
+
+  const load = useCallback(() => {
+    setState("loading");
+    fetchAllPlayers()
+      .then((rows) => { setPlayers(rows); setState("ok"); })
+      .catch((e) => { setErr(String(e.message || e)); setState("error"); });
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const now = Date.now();
+  const rows = useMemo(() => {
+    const mapped = players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      allTime: p.handsAllTime || 0,
+      last24: (p.recentHands || []).filter((t) => now - t < DAY_MS).length,
+      lastHandTs: p.lastHandTs || 0,
+    }));
+    const dir = sortDir === "asc" ? 1 : -1;
+    mapped.sort((a, b) => {
+      let av = a[sortKey], bv = b[sortKey];
+      if (sortKey === "name") { av = av.toLowerCase(); bv = bv.toLowerCase(); return av < bv ? -dir : av > bv ? dir : 0; }
+      return (av - bv) * dir;
+    });
+    return mapped;
+  }, [players, sortKey, sortDir, now]);
+
+  const totalAllTime = players.length;
+  const active24 = players.filter((p) => now - (p.lastHandTs || 0) < DAY_MS).length;
+
+  const sortOn = (key) => {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir(key === "name" ? "asc" : "desc"); }
+  };
+  const arrow = (key) => (sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "");
+
+  const cols = [
+    { key: "name", label: "Player", align: "left" },
+    { key: "allTime", label: "Hands (all-time)", align: "right" },
+    { key: "last24", label: "Hands (24h)", align: "right" },
+    { key: "lastHandTs", label: "Last hand", align: "right" },
+  ];
+
+  return (
+    <div className="uth-metrics">
+      <div className="uth-metrics-head">
+        <div>
+          <span className="uth-summary-kicker">Admin</span>
+          <h2>Player metrics</h2>
+        </div>
+        <div className="uth-metrics-actions">
+          <button className="uth-reset" onClick={load}>Refresh</button>
+          <button className="uth-reset" onClick={onBack}>&larr; Back</button>
+        </div>
+      </div>
+
+      {!isConfigured() && (
+        <div className="uth-metrics-note">
+          Showing <b>this device only</b>. Add your Firebase config in
+          <code> src/metricsStore.js</code> to aggregate every player across
+          devices.
+        </div>
+      )}
+      {state === "error" && (
+        <div className="uth-metrics-note uth-metrics-note--err">
+          Couldn&rsquo;t load players: {err}
+        </div>
+      )}
+
+      <div className="uth-metrics-totals">
+        <div className="uth-summary-hero">
+          <span className="uth-summary-hero-v">{active24}</span>
+          <span className="uth-summary-hero-k">Players active in the last 24h</span>
+        </div>
+        <div className="uth-summary-hero">
+          <span className="uth-summary-hero-v">{totalAllTime}</span>
+          <span className="uth-summary-hero-k">Players all-time</span>
+        </div>
+      </div>
+
+      <div className="uth-table-wrap2">
+        <table className="uth-table">
+          <thead>
+            <tr>
+              {cols.map((c) => (
+                <th
+                  key={c.key}
+                  className={`uth-th uth-th--${c.align} ${sortKey === c.key ? "is-sorted" : ""}`}
+                  onClick={() => sortOn(c.key)}
+                >
+                  {c.label}{arrow(c.key)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {state === "loading" ? (
+              <tr><td className="uth-td-empty" colSpan={4}>Loading…</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td className="uth-td-empty" colSpan={4}>No players yet.</td></tr>
+            ) : (
+              rows.map((r) => (
+                <tr key={r.id} className={me && r.id === me.deviceId ? "is-me" : ""}>
+                  <td className="uth-td uth-td--left">
+                    {r.name}{me && r.id === me.deviceId ? <span className="uth-you-tag">you</span> : null}
+                  </td>
+                  <td className="uth-td uth-td--right">{r.allTime}</td>
+                  <td className="uth-td uth-td--right">{r.last24}</td>
+                  <td className="uth-td uth-td--right" title={r.lastHandTs ? new Date(r.lastHandTs).toLocaleString() : ""}>
+                    {relTime(r.lastHandTs)}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ===========================================================================
 //  STYLES
 // ===========================================================================
 const STYLES = `
@@ -1417,6 +1611,44 @@ html,body{margin:0;padding:0;background:#0b0d10}
 /* ---------- footer ---------- */
 .uth-foot{font-size:11px;color:var(--muted);line-height:1.5;text-align:center;border-top:1px solid var(--line);padding-top:8px;max-width:820px;margin:0 auto}
 .uth-foot b{color:var(--txt)}
+
+/* ---------- name gate + whoami + metrics button ---------- */
+.uth-gate{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:18px;
+  background:rgba(6,8,11,.82);backdrop-filter:blur(6px)}
+.uth-gate-card{width:100%;max-width:360px;background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:18px;padding:22px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 30px 70px rgba(0,0,0,.6)}
+.uth-gate-mark{width:52px;height:52px;font-size:22px}
+.uth-gate-card h2{margin:2px 0 0;font-size:19px}
+.uth-gate-card p{margin:0;font-size:13px;color:var(--muted);line-height:1.5}
+.uth-gate-input{width:100%;background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:11px;padding:12px 14px;color:var(--txt);font-size:16px;text-align:center;outline:none}
+.uth-gate-input:focus{border-color:var(--gold)}
+.uth-gate-card .uth-key--submit{width:100%}
+.uth-whoami{display:inline-flex;align-items:center;padding:7px 12px;border-radius:9px;font-weight:700;font-size:13px;color:var(--gold);background:rgba(231,198,90,.1);border:1px solid rgba(231,198,90,.28);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.uth-modes-metrics{color:var(--accent) !important}
+.uth-modes-metrics.is-active{background:linear-gradient(160deg,#5aa9e6,#3f7fb8) !important;color:#06121c !important}
+
+/* ---------- metrics page ---------- */
+.uth-metrics{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:14px;max-width:900px;margin:0 auto;width:100%;animation:uthRise .3s ease both}
+.uth-metrics-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.uth-metrics-head h2{margin:2px 0 0;font-size:24px}
+.uth-metrics-actions{display:flex;gap:8px}
+.uth-metrics-note{font-size:12px;color:var(--muted);background:rgba(90,169,230,.08);border:1px solid rgba(90,169,230,.25);border-radius:10px;padding:9px 12px;line-height:1.5}
+.uth-metrics-note code{color:var(--accent);font-size:11px}
+.uth-metrics-note--err{background:rgba(239,91,100,.08);border-color:rgba(239,91,100,.35);color:var(--bad)}
+.uth-metrics-totals{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.uth-table-wrap2{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+.uth-table{width:100%;border-collapse:collapse;font-size:14px;min-width:420px}
+.uth-th{padding:11px 14px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);background:rgba(0,0,0,.25);cursor:pointer;user-select:none;white-space:nowrap;border-bottom:1px solid var(--line)}
+.uth-th:hover{color:var(--txt)}
+.uth-th.is-sorted{color:var(--gold)}
+.uth-th--right{text-align:right}
+.uth-td{padding:10px 14px;border-bottom:1px solid rgba(42,54,68,.6);font-variant-numeric:tabular-nums}
+.uth-td--right{text-align:right}
+.uth-td--left{font-weight:600}
+.uth-table tbody tr:last-child .uth-td{border-bottom:0}
+.uth-table tbody tr:hover{background:rgba(255,255,255,.03)}
+.uth-table tbody tr.is-me{background:rgba(231,198,90,.08)}
+.uth-you-tag{margin-left:8px;font-size:10px;font-weight:800;color:var(--gold);background:rgba(231,198,90,.15);padding:1px 7px;border-radius:999px;text-transform:uppercase;letter-spacing:.4px}
+.uth-td-empty{padding:22px;text-align:center;color:var(--muted)}
 
 /* ---------- responsive ---------- */
 /* Desktop: float the session stats as a compact HUD in the top-right so the
