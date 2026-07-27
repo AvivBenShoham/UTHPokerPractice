@@ -286,10 +286,24 @@ function ChipStack() {
 // ===========================================================================
 //  MAIN COMPONENT
 // ===========================================================================
+const DRILL_LEN = 10; // hands per drill before the summary shows
 const EMPTY_STATS = {
   rounds: 0, exact: 0, close: 0, off: 0, correctSide: 0, absErrSum: 0,
-  streak: 0, bestStreak: 0, points: 0,
+  streak: 0, bestStreak: 0, points: 0, timeSum: 0,
 };
+const EMPTY_DRILL = {
+  hands: 0, exact: 0, close: 0, off: 0, correctSide: 0, absErrSum: 0,
+  timeSum: 0, points: 0,
+};
+
+// format a millisecond duration as "4.2s" (under a minute) or "1:05".
+function fmtTime(ms) {
+  if (ms == null || ms < 0 || Number.isNaN(ms)) ms = 0;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  return `${m}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+}
 
 export default function UTHOutsTrainer() {
   const [mode, setMode] = useState("practice"); // 'practice' | 'manual'
@@ -302,6 +316,14 @@ export default function UTHOutsTrainer() {
   const [guess, setGuess] = useState("");
   const [result, setResult] = useState(null); // {truth, verdict...} after submit
   const [stats, setStats] = useState(EMPTY_STATS);
+
+  // timing + 10-hand drill
+  const [handStart, setHandStart] = useState(() => Date.now());
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const [decisionMs, setDecisionMs] = useState(null); // frozen time for the shown result
+  const [drill, setDrill] = useState(EMPTY_DRILL);
+  const [drillNo, setDrillNo] = useState(1);
+  const [drillDone, setDrillDone] = useState(false); // show the drill summary
 
   // manual builder
   const [manualHole, setManualHole] = useState([null, null]);
@@ -328,12 +350,19 @@ export default function UTHOutsTrainer() {
     setDealKey((k) => k + 1);
     setGuess("");
     setResult(null);
+    setDecisionMs(null);
+    const t = Date.now();
+    setHandStart(t);
+    setNowTick(t);
   }, []);
 
+  const drillComplete = drill.hands >= DRILL_LEN;
+
   const submitGuess = useCallback(() => {
-    if (result) return;
+    if (result || drillDone) return;
     const g = parseInt(guess, 10);
     if (Number.isNaN(g)) return;
+    const dMs = Date.now() - handStart;
     const diff = Math.abs(g - truth.total);
     const bucket = diff === 0 ? "exact" : diff <= 2 ? "close" : "off";
     const correctSide = g >= 21 === truth.total >= 21;
@@ -342,7 +371,8 @@ export default function UTHOutsTrainer() {
     if (bucket === "exact") earned += 10;
     else if (bucket === "close") earned += 5;
 
-    setResult({ guess: g, diff, bucket, correctSide, earned });
+    setDecisionMs(dMs);
+    setResult({ guess: g, diff, bucket, correctSide, earned, timeMs: dMs });
     setStats((s) => ({
       rounds: s.rounds + 1,
       exact: s.exact + (bucket === "exact" ? 1 : 0),
@@ -353,8 +383,27 @@ export default function UTHOutsTrainer() {
       streak: correctSide ? s.streak + 1 : 0,
       bestStreak: Math.max(s.bestStreak, correctSide ? s.streak + 1 : 0),
       points: s.points + earned,
+      timeSum: s.timeSum + dMs,
     }));
-  }, [guess, truth, result]);
+    setDrill((d) => ({
+      hands: d.hands + 1,
+      exact: d.exact + (bucket === "exact" ? 1 : 0),
+      close: d.close + (bucket === "close" ? 1 : 0),
+      off: d.off + (bucket === "off" ? 1 : 0),
+      correctSide: d.correctSide + (correctSide ? 1 : 0),
+      absErrSum: d.absErrSum + diff,
+      timeSum: d.timeSum + dMs,
+      points: d.points + earned,
+    }));
+  }, [guess, truth, result, drillDone, handStart]);
+
+  const finishDrill = useCallback(() => setDrillDone(true), []);
+  const startNewDrill = useCallback(() => {
+    setDrill(EMPTY_DRILL);
+    setDrillNo((n) => n + 1);
+    setDrillDone(false);
+    dealNext();
+  }, [dealNext]);
 
   const onPad = useCallback(
     (key) => {
@@ -370,18 +419,41 @@ export default function UTHOutsTrainer() {
     [result, submitGuess]
   );
 
+  // live stopwatch: tick while a hand is being decided
+  const running = mode === "practice" && !result && !drillDone;
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNowTick(Date.now()), 100);
+    return () => clearInterval(id);
+  }, [running]);
+
+  // restart the current hand's timer when (re)entering practice mode
+  useEffect(() => {
+    if (mode === "practice" && !result && !drillDone) {
+      const t = Date.now();
+      setHandStart(t);
+      setNowTick(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
   // keyboard support for practice
   useEffect(() => {
     if (mode !== "practice") return;
     const h = (e) => {
+      if (drillDone) {
+        if (e.key === "Enter") startNewDrill();
+        return;
+      }
       if (e.key >= "0" && e.key <= "9") onPad(e.key);
       else if (e.key === "Backspace") onPad("del");
-      else if (e.key === "Enter") (result ? dealNext() : onPad("ok"));
+      else if (e.key === "Enter")
+        result ? (drillComplete ? finishDrill() : dealNext()) : onPad("ok");
       else if (e.key === "Escape") onPad("clr");
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [mode, onPad, result, dealNext]);
+  }, [mode, onPad, result, dealNext, drillDone, drillComplete, finishDrill, startNewDrill]);
 
   // ------- manual mode helpers -------
   const manualCards = useMemo(
@@ -444,6 +516,9 @@ export default function UTHOutsTrainer() {
   // ---- derived stat percentages ----
   const pct = (n) => (stats.rounds ? Math.round((100 * n) / stats.rounds) : 0);
   const avgErr = stats.rounds ? (stats.absErrSum / stats.rounds).toFixed(1) : "0.0";
+  const avgTime = stats.rounds ? fmtTime(stats.timeSum / stats.rounds) : "–";
+  const elapsedMs = result ? decisionMs ?? 0 : nowTick - handStart;
+  const handNo = result || drillDone ? drill.hands : Math.min(drill.hands + 1, DRILL_LEN);
 
   // =========================================================================
   //  RENDER
@@ -487,7 +562,24 @@ export default function UTHOutsTrainer() {
           stats={stats}
           pct={pct}
           avgErr={avgErr}
-          onReset={() => setStats(EMPTY_STATS)}
+          avgTime={avgTime}
+          elapsedMs={elapsedMs}
+          running={running}
+          handNo={handNo}
+          drillLen={DRILL_LEN}
+          drillNo={drillNo}
+          drill={drill}
+          drillDone={drillDone}
+          drillComplete={drillComplete}
+          onFinishDrill={finishDrill}
+          onNewDrill={startNewDrill}
+          onReset={() => {
+            setStats(EMPTY_STATS);
+            setDrill(EMPTY_DRILL);
+            setDrillNo(1);
+            setDrillDone(false);
+            dealNext();
+          }}
         />
       ) : (
         <ManualView
@@ -521,41 +613,70 @@ export default function UTHOutsTrainer() {
 // ===========================================================================
 function PracticeView({
   scenario, dealKey, truth, guess, result, onPad, onSubmit, onDealNext,
-  stats, pct, avgErr, onReset,
+  stats, pct, avgErr, avgTime, elapsedMs, running, handNo, drillLen, drillNo,
+  drill, drillDone, drillComplete, onFinishDrill, onNewDrill, onReset,
 }) {
   return (
     <div className="uth-view uth-view--practice">
-      <div className={`uth-main ${result ? "uth-main--result" : ""}`}>
-        <PokerTable
-          hole={scenario.hole}
-          board={scenario.board}
-          dealKey={dealKey}
-          revealResult={!!result}
-        />
-
-        {!result ? (
-          <div className="uth-guess-dock">
-            <div className="uth-prompt">
-              <span className="uth-prompt-q">
-                Unseen cards that beat you?
-              </span>
-              <div className="uth-guess-display">
-                <span className="uth-guess-num">{guess === "" ? "–" : guess}</span>
-                <span className="uth-guess-unit">outs</span>
-              </div>
-            </div>
-            <NumberPad guess={guess} onPad={onPad} />
-          </div>
-        ) : (
-          <ResultPanel
-            result={result}
-            truth={truth}
-            onDealNext={onDealNext}
+      {drillDone ? (
+        <div className="uth-main">
+          <DrillSummary
+            drill={drill}
+            drillNo={drillNo}
+            drillLen={drillLen}
+            onNewDrill={onNewDrill}
           />
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className={`uth-main ${result ? "uth-main--result" : ""}`}>
+          <PokerTable
+            hole={scenario.hole}
+            board={scenario.board}
+            dealKey={dealKey}
+            revealResult={!!result}
+          />
 
-      <StatsPanel stats={stats} pct={pct} avgErr={avgErr} onReset={onReset} float />
+          {!result ? (
+            <div className="uth-guess-dock">
+              <div className="uth-prompt">
+                <span className="uth-prompt-q">
+                  Unseen cards that beat you?
+                  <span className="uth-prompt-hand">Hand {handNo}/{drillLen}</span>
+                </span>
+                <div className="uth-guess-display">
+                  <span className="uth-guess-num">{guess === "" ? "–" : guess}</span>
+                  <span className="uth-guess-unit">outs</span>
+                </div>
+              </div>
+              <NumberPad guess={guess} onPad={onPad} />
+            </div>
+          ) : (
+            <ResultPanel
+              result={result}
+              truth={truth}
+              drillComplete={drillComplete}
+              handNo={handNo}
+              drillLen={drillLen}
+              onDealNext={onDealNext}
+              onFinishDrill={onFinishDrill}
+            />
+          )}
+        </div>
+      )}
+
+      <StatsPanel
+        stats={stats}
+        pct={pct}
+        avgErr={avgErr}
+        avgTime={avgTime}
+        elapsedMs={elapsedMs}
+        running={running}
+        handNo={handNo}
+        drillLen={drillLen}
+        drillNo={drillNo}
+        onReset={onReset}
+        float
+      />
     </div>
   );
 }
@@ -586,9 +707,8 @@ function NumberPad({ guess, onPad }) {
   );
 }
 
-function ResultPanel({ result, truth, onDealNext }) {
+function ResultPanel({ result, truth, drillComplete, handNo, drillLen, onDealNext, onFinishDrill }) {
   const { guess, diff, bucket, correctSide, earned } = result;
-  const bucketLabel = bucket === "exact" ? "Exact" : bucket === "close" ? "Close" : "Off";
   return (
     <div className="uth-result">
       <div className={`uth-verdict uth-verdict--${bucket} ${correctSide ? "" : "uth-verdict--wrongside"}`}>
@@ -631,9 +751,15 @@ function ResultPanel({ result, truth, onDealNext }) {
 
       <OutsBreakdown truth={truth} />
 
-      <button className="uth-key uth-key--submit uth-deal-next" onClick={onDealNext}>
-        Deal next hand &rarr;
-      </button>
+      {drillComplete ? (
+        <button className="uth-key uth-key--submit uth-deal-next" onClick={onFinishDrill}>
+          See drill summary &rarr;
+        </button>
+      ) : (
+        <button className="uth-key uth-key--submit uth-deal-next" onClick={onDealNext}>
+          Deal next hand ({handNo}/{drillLen}) &rarr;
+        </button>
+      )}
     </div>
   );
 }
@@ -669,7 +795,7 @@ function OutsBreakdown({ truth }) {
   );
 }
 
-function StatsPanel({ stats, pct, avgErr, onReset, float }) {
+function StatsPanel({ stats, pct, avgErr, avgTime, elapsedMs, running, handNo, drillLen, drillNo, onReset, float }) {
   return (
     <aside className={`uth-stats ${float ? "uth-stats--float" : ""}`}>
       <div className="uth-stats-head">
@@ -686,12 +812,15 @@ function StatsPanel({ stats, pct, avgErr, onReset, float }) {
         <Stat k="Rounds" v={stats.rounds} />
         <Stat k="Streak" v={stats.streak} sub={`best ${stats.bestStreak}`} />
         <Stat k="Avg error" v={avgErr} sub="outs" />
-        <Stat k="Right side" v={stats.correctSide} sub={`of ${stats.rounds}`} tone="side" />
+        <Stat k="Avg time" v={avgTime} sub="to decide" tone="time" />
+        <Stat k="Right side" v={stats.correctSide} sub={`of ${stats.rounds}`} tone="side" secondary />
         <Stat k="Points" v={stats.points} secondary />
         <Stat k="Exact" v={stats.exact} sub={`${pct(stats.exact)}%`} tone="exact" secondary />
         <Stat k="Close (±2)" v={stats.close} sub={`${pct(stats.close)}%`} tone="close" secondary />
         <Stat k="Off" v={stats.off} sub={`${pct(stats.off)}%`} tone="off" secondary />
       </div>
+
+      <StopWatch elapsedMs={elapsedMs} running={running} handNo={handNo} drillLen={drillLen} drillNo={drillNo} />
 
       <div className="uth-help">
         <p><b>The unit is OUTS</b>, not probability &mdash; count single unseen
@@ -710,6 +839,60 @@ function Stat({ k, v, sub, tone, secondary }) {
       <span className="uth-stat-v">{v}</span>
       <span className="uth-stat-k">{k}</span>
       {sub != null ? <span className="uth-stat-sub">{sub}</span> : null}
+    </div>
+  );
+}
+
+// Live stopwatch shown below the session stats: ticks while a hand is being
+// decided, freezes on the result, resets on the next deal.
+function StopWatch({ elapsedMs, running, handNo, drillLen, drillNo }) {
+  return (
+    <div className={`uth-clock ${running ? "is-running" : "is-stopped"}`}>
+      <span className="uth-clock-icon" aria-hidden="true">
+        <span className="uth-clock-hand" />
+      </span>
+      <div className="uth-clock-body">
+        <span className="uth-clock-time">{fmtTime(elapsedMs)}</span>
+        <span className="uth-clock-meta">hand {handNo}/{drillLen} &middot; drill {drillNo}</span>
+      </div>
+    </div>
+  );
+}
+
+// Drill summary shown after every DRILL_LEN hands.
+function DrillSummary({ drill, drillNo, drillLen, onNewDrill }) {
+  const n = drill.hands || 1;
+  const decPct = Math.round((100 * drill.correctSide) / n);
+  const avgErr = (drill.absErrSum / n).toFixed(1);
+  const avgTime = fmtTime(drill.timeSum / n);
+  const grade =
+    decPct >= 90 ? "Sharp" : decPct >= 70 ? "Solid" : decPct >= 50 ? "Getting there" : "Keep drilling";
+  return (
+    <div className="uth-summary">
+      <div className="uth-summary-head">
+        <span className="uth-summary-kicker">Drill {drillNo} complete &middot; {drill.hands} hands</span>
+        <h2>{grade}</h2>
+      </div>
+
+      <div className="uth-summary-hero">
+        <span className="uth-summary-hero-v">{decPct}%</span>
+        <span className="uth-summary-hero-k">
+          Correct bet/fold decisions ({drill.correctSide}/{drill.hands})
+        </span>
+      </div>
+
+      <div className="uth-stat-grid uth-summary-grid">
+        <Stat k="Exact" v={drill.exact} sub={`${Math.round((100 * drill.exact) / n)}%`} tone="exact" />
+        <Stat k="Close (±2)" v={drill.close} sub={`${Math.round((100 * drill.close) / n)}%`} tone="close" />
+        <Stat k="Off" v={drill.off} sub={`${Math.round((100 * drill.off) / n)}%`} tone="off" />
+        <Stat k="Avg error" v={avgErr} sub="outs" />
+        <Stat k="Avg time" v={avgTime} sub="to decide" tone="time" />
+        <Stat k="Points" v={drill.points} />
+      </div>
+
+      <button className="uth-key uth-key--submit" onClick={onNewDrill}>
+        Start drill {drillNo + 1} ({drillLen} hands) &rarr;
+      </button>
     </div>
   );
 }
@@ -1168,10 +1351,37 @@ html,body{margin:0;padding:0;background:#0b0d10}
 .uth-stat--close .uth-stat-v{color:var(--warn)}
 .uth-stat--off .uth-stat-v{color:var(--bad)}
 .uth-stat--side .uth-stat-v{color:var(--gold)}
+.uth-stat--time .uth-stat-v{color:var(--accent)}
 .uth-help{font-size:11px;color:var(--muted);line-height:1.45;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:10px}
 .uth-help b{color:var(--txt)}
 /* practice: keep the static (narrow-screen) stats tidy and centered */
 .uth-view--practice .uth-stats{max-width:560px;margin:0 auto;position:static}
+
+/* ---------- stopwatch (below the session stats) ---------- */
+.uth-clock{display:flex;align-items:center;gap:10px;background:rgba(0,0,0,.28);border:1px solid var(--line);border-radius:11px;padding:8px 11px}
+.uth-clock.is-running{box-shadow:inset 0 0 0 1px rgba(90,169,230,.4)}
+.uth-clock-icon{position:relative;width:22px;height:22px;border-radius:50%;flex:0 0 auto;
+  border:2px solid var(--accent);background:radial-gradient(circle at 50% 45%,rgba(90,169,230,.16),rgba(0,0,0,0))}
+.uth-clock-icon::before{content:"";position:absolute;top:-4px;left:50%;transform:translateX(-50%);width:6px;height:3px;border-radius:2px;background:var(--accent)}
+.uth-clock-hand{position:absolute;left:50%;top:50%;width:2px;height:8px;background:var(--accent);border-radius:2px;transform-origin:50% 100%;transform:translate(-50%,-100%)}
+.uth-clock.is-running .uth-clock-hand{animation:uthSweep 2s linear infinite}
+@keyframes uthSweep{from{transform:translate(-50%,-100%) rotate(0deg)}to{transform:translate(-50%,-100%) rotate(360deg)}}
+.uth-clock-body{display:flex;flex-direction:column;min-width:0}
+.uth-clock-time{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.05;color:var(--txt)}
+.uth-clock.is-running .uth-clock-time{color:var(--accent)}
+.uth-clock-meta{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---------- drill summary ---------- */
+.uth-summary{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:14px;animation:uthRise .3s ease both}
+.uth-summary-head{text-align:center;display:flex;flex-direction:column;gap:3px}
+.uth-summary-kicker{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:700}
+.uth-summary-head h2{margin:0;font-size:26px;color:var(--gold)}
+.uth-summary-hero{background:radial-gradient(120% 130% at 50% 0%,rgba(231,198,90,.14),rgba(0,0,0,0));border:1px solid rgba(231,198,90,.3);border-radius:14px;padding:16px;text-align:center;display:flex;flex-direction:column;gap:3px}
+.uth-summary-hero-v{font-size:46px;font-weight:800;color:var(--gold);line-height:1;font-variant-numeric:tabular-nums}
+.uth-summary-hero-k{font-size:13px;color:var(--muted)}
+.uth-summary-grid{grid-template-columns:repeat(3,1fr)}
+@media(max-width:480px){.uth-summary-grid{grid-template-columns:repeat(2,1fr)}}
+.uth-prompt-hand{margin-left:8px;font-size:11px;font-weight:700;color:var(--accent);background:rgba(90,169,230,.14);padding:2px 8px;border-radius:999px;letter-spacing:.3px}
 
 /* ---------- manual ---------- */
 .uth-manual-dock{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:14px}
@@ -1260,14 +1470,24 @@ html,body{margin:0;padding:0;background:#0b0d10}
   .uth-view--practice .uth-stats--float .uth-stat--secondary{display:none}
   .uth-view--practice .uth-stats--float .uth-stat-sub{display:none}
   .uth-view--practice .uth-stats--float .uth-stats-head h2{font-size:10px;letter-spacing:.3px;text-transform:uppercase}
-  .uth-view--practice .uth-stats--float .uth-headline{padding:4px}
-  .uth-view--practice .uth-stats--float .uth-headline-v{font-size:17px}
+  .uth-view--practice .uth-stats--float .uth-headline{padding:3px}
+  .uth-view--practice .uth-stats--float .uth-headline-v{font-size:15px}
   .uth-view--practice .uth-stats--float .uth-headline-k{font-size:8px}
-  .uth-view--practice .uth-stats--float .uth-stat-grid{gap:4px}
-  .uth-view--practice .uth-stats--float .uth-stat{padding:3px 6px}
+  .uth-view--practice .uth-stats--float .uth-stat-grid{gap:3px}
+  .uth-view--practice .uth-stats--float .uth-stat{padding:2px 6px}
   .uth-view--practice .uth-stats--float .uth-stat-v{font-size:13px;line-height:1.05}
   .uth-view--practice .uth-stats--float .uth-stat-k{font-size:7px}
   .uth-view--practice .uth-stats--float .uth-reset{padding:2px 6px;font-size:9px}
+  /* compact stopwatch inside the phone HUD */
+  .uth-view--practice .uth-stats--float .uth-clock{padding:3px 7px;gap:6px}
+  .uth-view--practice .uth-stats--float .uth-clock-icon{width:14px;height:14px}
+  .uth-view--practice .uth-stats--float .uth-clock-time{font-size:13px}
+  .uth-view--practice .uth-stats--float .uth-clock-meta{font-size:7px}
+  /* hide betting circles on phones (small table) and nudge the board down a
+     touch so the taller HUD stays above the cards without crowding the hole */
+  .uth-betcircles{display:none}
+  .uth-view--practice .uth-main:not(.uth-main--result) .uth-board{top:45%}
+  .uth-view--practice .uth-main:not(.uth-main--result) .uth-seat-zone{bottom:9%}
 }
 @media(max-width:420px){
   .uth-app{padding:10px;gap:8px}
