@@ -133,36 +133,36 @@ function describeScore(s) {
 }
 
 // ===========================================================================
-//  OUT-COUNTING CONVENTION  (stated precisely — this IS the authority the
-//  player's guess is scored against, so it must be counted the same way a
-//  human counts single cards at the table for the UTH river "21 rule").
+//  OUT-COUNTING CONVENTION  (this IS the authority the player's guess is scored
+//  against, so it is counted the same way a player counts single cards at the
+//  table for the published Ultimate Texas Hold'em river "21 outs" rule).
 //
 //  Unseen cards = 52 - 2 player hole - 5 board = 45.
 //
-//  A single unseen card c is a DEALER OUT if EITHER:
+//  A single unseen card c is a DEALER OUT when the dealer's best 5-card hand
+//  drawn from {c} + the 5 board cards STRICTLY beats the player's best 5-card
+//  hand. Evaluated exactly, that single-card definition reproduces the
+//  published rule's categories:
+//    • PAIR THE BOARD — c pairs a board rank into a pair/two pair/trips/boat/
+//      quads that beats the player (3 cards per board rank if the player holds
+//      none of it).
+//    • OUT-KICK OVERCARD — when the player only plays the board (no made pair),
+//      a live higher card lifts the dealer's high-card hand above the player
+//      (all 4 cards of that rank).  e.g. board A K T 7 2, the J and Q each
+//      out-kick you: 2 ranks x 4 = 8 outs — matching the published example.
+//    • FLUSH / STRAIGHT FILL — a lone card that completes a flush (4 of a suit
+//      already on the board) or a straight (board already 4-to-a-straight).
 //
-//   (A) SINGLE-CARD MADE HAND — the dealer's best 5-card hand drawn from
-//       {c} + the 5 board cards STRICTLY beats the player's best 5-card hand.
-//       Evaluated exactly, this covers:
-//         • pairing a board rank into a pair/two pair/trips/boat/quads that
-//           beats the player,
-//         • a live overcard that lifts the dealer's high-card hand above the
-//           player when the player only plays the board (no pair),
-//         • completing a FLUSH when 4 of a suit are already on the board,
-//         • completing a STRAIGHT when the board already lies 4-to-a-straight.
-//       (A lone card cannot complete a 3-flush, so a 3-suited board yields 0
-//        single-card flush outs — flush/straight outs are 4-card-draw fills.)
+//  Dealer POCKET PAIRS are deliberately NOT counted as separate outs. A pocket
+//  pair is a TWO-card holding, not a single out card, and the published 21-rule
+//  counts cards that pair the board or out-kick you — it does not add the four
+//  cards of an over-rank as four pocket-pair "outs" (that would badly overcount
+//  a two-card event). In real UTH the pocket-pair case is absorbed by the
+//  separate "if you already hold a hidden pair or better, just bet" branch.
 //
-//   (B) POCKET-PAIR / OVERPAIR CONVENTION — a dealer pocket pair needs TWO
-//       hole cards, so it is never a single "out card". Standard river
-//       convention: pocket pairs are counted BY RANK. For every rank R that is
-//       NOT on the board, if a dealer pocket pair (R,R) beats the player's made
-//       hand AND at least two cards of rank R remain unseen (the pair is
-//       actually possible), each still-unseen card of rank R that is not
-//       already an out under (A) is counted as one dealer out.
-//
-//  No card is counted twice (outs accumulate in a Set), so the grouped
-//  breakdown always sums to the total.
+//  A lone card cannot complete a 3-flush, so a 3-suited board yields 0
+//  single-card flush outs. No card is counted twice (outs accumulate in a Set),
+//  so the grouped breakdown always sums to the total.
 //
 //  DECISION: 21 or more dealer outs => FOLD ; 20 or fewer => BET 1x.
 // ===========================================================================
@@ -181,7 +181,7 @@ function countOuts(hole, board) {
     groups.set(label, groups.get(label) + 1);
   };
 
-  // (A) single-card made hands
+  // A single card is an out iff its best 5 with the board beats the player.
   for (const c of unseen) {
     const ds = bestScore([c, ...board]);
     if (cmpScore(ds, playerScore) > 0) {
@@ -190,23 +190,7 @@ function countOuts(hole, board) {
       if (cat === CAT.FLUSH || cat === CAT.STRAIGHT_FLUSH) bump("Flush completions", 100);
       else if (cat === CAT.STRAIGHT) bump("Straight completions", 101);
       else if (boardRanks.has(c.r)) bump(`Pair the ${RANK_LABEL[c.r]}`, 200 - c.r);
-      else bump(`Overcard ${RANK_LABEL[c.r]}`, 300 - c.r);
-    }
-  }
-
-  // (B) pocket-pair overpairs, by rank
-  for (const R of RANKS) {
-    if (boardRanks.has(R)) continue;
-    const unseenR = unseen.filter((c) => c.r === R);
-    if (unseenR.length < 2) continue;
-    const dealerPocket = bestScore([{ r: R, s: "s" }, { r: R, s: "h" }, ...board]);
-    if (cmpScore(dealerPocket, playerScore) > 0) {
-      for (const c of unseenR) {
-        if (!outCards.has(cardId(c))) {
-          outCards.add(cardId(c));
-          bump(`Dealer pocket ${RANK_PLURAL[R]}`, 400 - R);
-        }
-      }
+      else bump(`Out-kick ${RANK_LABEL[c.r]}`, 300 - c.r);
     }
   }
 
@@ -523,10 +507,12 @@ export default function UTHOutsTrainer() {
       )}
 
       <footer className="uth-foot">
-        Convention: dealer outs are single unseen cards. (A) any card whose best
-        5 from {"{card + board}"} beats you (pairs, overcards, 4-card flush &amp;
-        straight fills); plus (B) higher dealer <b>pocket pairs</b> counted by
-        rank. <b>21+ outs &rarr; FOLD, 20 or fewer &rarr; BET&nbsp;1&times;.</b>
+        Convention: a dealer out is any single unseen card whose best 5 with the
+        board beats you &mdash; board pairs, out-kicking overcards, and 4-card
+        flush &amp; straight fills. Per the published 21-rule, dealer{" "}
+        <b>pocket pairs are not counted</b> as separate outs (a pocket pair is a
+        two-card holding, not single-card outs).{" "}
+        <b>21+ outs &rarr; FOLD, 20 or fewer &rarr; BET&nbsp;1&times;.</b>
       </footer>
     </div>
   );

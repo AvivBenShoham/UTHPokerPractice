@@ -146,29 +146,23 @@ export function describeScore(s) {
 //
 // Unseen cards = 52 - 2 player hole - 5 board = 45.
 //
-// A single unseen card c is a DEALER OUT if EITHER:
+// A single unseen card c is a DEALER OUT when the dealer's best 5-card hand
+// drawn from {c} + the 5 board cards STRICTLY beats the player's best 5-card
+// hand. Evaluated exactly this reproduces the published rule's categories:
+//   - PAIR THE BOARD: c pairs a board rank into a pair/two pair/trips/boat/
+//     quads that beats the player (3 per board rank if the player holds none).
+//   - OUT-KICK OVERCARD: when the player only plays the board (no made pair), a
+//     live higher card lifts the dealer's high-card hand above the player (all
+//     4 of that rank) — e.g. board A K T 7 2, the J and Q each out-kick you.
+//   - FLUSH / STRAIGHT FILL: a lone card completing a flush (4 of a suit on the
+//     board) or a straight (board already 4-to-a-straight).
 //
-//   (A) SINGLE-CARD MADE HAND — the dealer's best 5-card hand drawn from
-//       {c} + the 5 board cards strictly beats the player's best 5-card hand.
-//       This is exact and covers, with the real evaluator:
-//         - pairing a board rank into a pair / two pair / trips / boat / quads
-//           that beats the player,
-//         - a live overcard that lifts the dealer's high-card hand above the
-//           player (when the player only plays the board / no pair),
-//         - completing a FLUSH when 4 cards of a suit are already on the board,
-//         - completing a STRAIGHT when the board already lies 4-to-a-straight.
+// Dealer POCKET PAIRS are NOT counted as separate outs: a pocket pair is a
+// TWO-card holding, and the published 21-rule counts cards that pair the board
+// or out-kick you, not the four cards of an over-rank as four pocket "outs".
 //
-//   (B) POCKET-PAIR (OVERPAIR) CONVENTION — a dealer pocket pair needs TWO hole
-//       cards, so it cannot be a single "out card". Standard river convention:
-//       for every rank R that is NOT on the board, if a dealer pocket pair (R,R)
-//       would beat the player's made hand AND at least two cards of rank R are
-//       unseen (so the pair is actually possible), every still-unseen card of
-//       rank R that is not already an out under (A) is counted as a dealer out.
-//       Pocket pairs are therefore counted BY RANK, one out per composing card.
-//
-// No card is ever counted twice (results accumulate in a Set). Flush/straight
-// outs are single-card completions of a 4-card board draw — a lone card cannot
-// complete a 3-flush, so a 3-suited board contributes 0 single-card flush outs.
+// No card is ever counted twice (results accumulate in a Set). A lone card
+// cannot complete a 3-flush, so a 3-suited board contributes 0 flush outs.
 //
 // DECISION RULE:  21 or more dealer outs  -> FOLD ;  20 or fewer -> BET 1x.
 // (Ultimate Texas Hold'em river "21 outs" rule.)
@@ -184,7 +178,7 @@ export function countOuts(hole, board) {
   const groups = new Map(); // label -> count
   const bump = (label, n = 1) => groups.set(label, (groups.get(label) || 0) + n);
 
-  // (A) single-card made hands
+  // A single card is an out iff its best 5 with the board beats the player.
   for (const c of unseen) {
     const ds = bestScore([c, ...board]);
     if (cmpScore(ds, playerScore) > 0) {
@@ -194,27 +188,11 @@ export function countOuts(hole, board) {
       if (cat === CAT.FLUSH || cat === CAT.STRAIGHT_FLUSH) bump("Flush completions");
       else if (cat === CAT.STRAIGHT) bump("Straight completions");
       else if (boardRanks.has(c.r)) bump(`Pair the ${RANK_LABEL[c.r]}`);
-      else bump(`Overcard ${RANK_LABEL[c.r]}`);
+      else bump(`Out-kick ${RANK_LABEL[c.r]}`);
     }
   }
 
-  // (B) pocket-pair overpairs (by rank)
-  for (const R of RANKS) {
-    if (boardRanks.has(R)) continue; // on-board ranks handled by (A)
-    const unseenR = unseen.filter((c) => c.r === R);
-    if (unseenR.length < 2) continue;
-    const dealerPocket = bestScore([{ r: R, s: "s" }, { r: R, s: "h" }, ...board]);
-    if (cmpScore(dealerPocket, playerScore) > 0) {
-      for (const c of unseenR) {
-        if (!outCards.has(cardId(c))) {
-          outCards.add(cardId(c));
-          bump(`Dealer pocket ${RANK_PLURAL[R]}`);
-        }
-      }
-    }
-  }
-
-  // Build ordered breakdown (pairs by rank desc, then straight, flush, pockets)
+  // Build ordered breakdown.
   const breakdown = [...groups.entries()].map(([label, count]) => ({ label, count }));
 
   return {

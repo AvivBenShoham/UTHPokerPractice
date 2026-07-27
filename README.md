@@ -54,23 +54,31 @@ over- or under-counted.
 ## Out-counting convention (stated precisely)
 
 Unseen cards = `52 − 2 hole − 5 board = 45`. A single unseen card `c` is a
-**dealer out** if **either**:
+**dealer out** when the dealer's best 5-card hand drawn from `{c} + the 5 board
+cards` **strictly beats** the player's best 5-card hand. Evaluated with the
+exact poker evaluator, that single-card definition reproduces the published
+rule's categories:
 
-- **(A) Single-card made hand** — the dealer's best 5-card hand drawn from
-  `{c} + the 5 board cards` **strictly beats** the player's best 5-card hand.
-  Evaluated with the exact poker evaluator, this covers pairing a board rank
-  into a pair/two pair/trips/full house/quads, a live **overcard** that lifts
-  the dealer's high-card hand above the player (when the player only plays the
-  board), completing a **flush** when 4 of a suit are already on the board, and
-  completing a **straight** when the board already lies 4-to-a-straight. (A lone
-  card cannot complete a 3-flush, so flush/straight outs are 4-card-draw fills.)
+- **Pair the board** — `c` pairs a board rank into a pair/two pair/trips/full
+  house/quads that beats the player (3 cards per board rank when the player
+  holds none of it).
+- **Out-kick overcard** — when the player only plays the board (no made pair),
+  a live higher card lifts the dealer's high-card hand above the player (all 4
+  cards of that rank). For example, on board `A K T 7 2` against a `A K T 9 8`
+  player, only the J and Q out-kick: 2 ranks × 4 = **8** outs.
+- **Flush / straight fill** — a lone card completing a flush (4 of a suit
+  already on the board) or a straight (board already 4-to-a-straight). A lone
+  card cannot complete a 3-flush, so a 3-suited board yields 0 single-card
+  flush outs.
 
-- **(B) Pocket-pair / overpair convention** — a dealer pocket pair needs *two*
-  hole cards, so it is never a single "out card". Per the standard river
-  convention, **pocket pairs are counted by rank**: for every rank `R` not on
-  the board, if a dealer pocket pair `(R,R)` beats the player's made hand *and*
-  at least two cards of rank `R` remain unseen, each still-unseen card of rank
-  `R` (that isn't already an out under (A)) is counted as one dealer out.
+**Dealer pocket pairs are *not* counted as separate outs.** A pocket pair is a
+*two-card* holding, not single-card outs; counting the four cards of an
+over-rank as four "pocket outs" badly overcounts a two-card event. The published
+UTH 21-rule counts cards that pair the board or out-kick you, and folds the
+pocket-pair case into the separate "if you already hold a hidden pair or better,
+just bet" branch. (This is corrected from an earlier version that counted pocket
+pairs by rank — the fix drops the average random-deal fold rate from ~65% to a
+realistic ~20%.)
 
 No card is ever counted twice, so the grouped breakdown always sums to the
 total. The exact same convention is documented in a comment block at the top of
@@ -81,8 +89,9 @@ total. The exact same convention is documented in a comment block at the top of
 
 The hand evaluator is exact — full houses, quads, flushes, straights including
 the wheel (A-2-3-4-5), and board-plays-the-hand cases all fall out of the
-general logic. `npm test` runs 36 assertions covering category detection, hand
-ordering, kicker resolution, best-of-7 selection, and hand-specific out counts
-(the nuts = 0 outs; a Queen-high board flush = exactly the 7 higher clubs;
-bottom pair on a high board = a fold; plus a 5,000-deal invariant check that the
-breakdown always sums to the total).
+general logic. `npm test` runs 41 assertions covering category detection, hand
+ordering, kicker resolution, best-of-7 selection, and hand-specific out counts —
+including the published Wizard-of-Odds example (board `A K T 7 2` vs `A K T 9 8`
+= 23 outs, J/Q out-kick = 8), the nuts = 0 outs, a Queen-high board flush =
+exactly the 7 higher clubs, and that pocket pairs never appear as outs — plus a
+5,000-deal invariant check that the breakdown always sums to the total.

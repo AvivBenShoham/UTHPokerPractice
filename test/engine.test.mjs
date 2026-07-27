@@ -51,36 +51,48 @@ eq("describe two pair", describeScore(score5(H("Ks Kh 9d 9c 2s"))), "Two Pair, K
 // ---- OUT COUNTING scenarios ----
 
 // Scenario 1: Player pocket 99, board K Q 7 4 2 rainbow.
-// (A) pairing K->pair Ks beats 99 (3), pairing Q->pair Qs beats (3). pairing 7,4,2 no.
-//     overcards: single A/J/T higher-card? player has a PAIR (99) so a lone overcard
-//     that doesn't pair board makes only high card < pair -> not an out. Good.
-// (B) pocket pairs beating 99, ranks not on board with >=2 unseen: TT, JJ, AA (T,J,A).
-//     each 4 unseen -> 12.  KK,QQ excluded (on board).
-// total = 3+3+12 = 18 -> BET
+// Player has a hidden pair (99); pocket pairs are NOT counted as outs.
+// pairing K->pair Ks beats 99 (3); pairing Q->pair Qs beats (3); pairing 7,4,2 no.
+// out-kick overcards: player holds a PAIR, so a lone card that doesn't pair the
+// board makes only a high card < pair -> not an out. No flush/straight.
+// total = 3+3 = 6 -> BET
 {
   const hole = H("9s 9h"), board = H("Ks Qh 7d 4c 2s");
   const r = countOuts(hole, board);
-  eq("S1 total", r.total, 18);
+  eq("S1 total", r.total, 6);
   assert("S1 bet", r.fold === false);
+  assert("S1 no pockets", !r.breakdown.some((b) => /pocket/i.test(b.label)));
   assert("S1 playerLabel", r.playerLabel.startsWith("Pair of Nines"));
 }
 
-// Scenario 2: Player weak pair 4s, board A K 9 4 2 (player holds 4d + x). one pair 4s.
-// Player = 4d 7c hole (7 blank), board As Kh 9d 4c 2s -> pair of 4s.
-// (A) pair A(3),K(3),9(3) beat; pair 4 -> dealer trips 4s beats pair 4s (2 unseen 4s left)->2;
-//     pair 2 no. overcards: lone card that beats pair of 4s as high? no, high<pair.
-//     A/K/Q/J/T/9/8/7/6/5 single make high card only (< pair) EXCEPT they don't beat a pair.
-// (B) pocket pairs beating pair of 4s, ranks not on board (>=2 unseen):
-//     55,66,77?(7 in player hole ->3 unseen still >=2 ok),88,TT,JJ,QQ. (99->on board, AA/KK on board)
-//     ranks: 5,6,7,8,T,J,Q = 7 ranks. counts: 7 has 3 unseen (one in hole), others 4.
-//     =4*6 + 3 = 27
-// total (A): A3 K3 93 +trips4 2 = 11 ; plus (B) 27 = 38 -> FOLD
+// Scenario 2: Player weak pair 4s, board A K 9 4 2 (player holds 4d + 7c blank).
+// Player best = pair of 4s with A K 9 kickers.
+// pair A(3), K(3), 9(3) beat the pair of 4s; pair 4 -> dealer pair of 4s with the
+// same A K 9 kickers = a TIE, not a strict beat -> 0; pair 2 < 4s -> 0.
+// A lone overcard makes only a high card < pair of 4s -> no out-kick outs. No
+// flush/straight. Pocket pairs are not counted. total = 3+3+3 = 9 -> BET
+// (matches the published rule: a hidden pair just bets).
 {
   const hole = H("4d 7c"), board = H("As Kh 9d 4c 2s");
   const r = countOuts(hole, board);
-  assert("S2 fold", r.fold === true);
-  assert("S2 many outs", r.total >= 21);
+  eq("S2 total", r.total, 9);
+  assert("S2 bet", r.fold === false);
+  assert("S2 no pockets", !r.breakdown.some((b) => /pocket/i.test(b.label)));
   assert("S2 pair4s", r.playerLabel.startsWith("Pair of Fours"));
+}
+
+// Scenario 2b: the published Wizard-of-Odds example. Board A K T 7 2, player
+// holds 9 8 (best five = A K T 9 8, no made pair). Any board pair beats the
+// player: A,K,T,7,2 -> 3 each = 15. With A K T 9 8, only the J and Q out-kick
+// (all 4 each -> 8); 3,4,5,6,8,9 do not. No flush/straight, no pockets.
+// total = 15 + 8 = 23 -> FOLD, exactly as published.
+{
+  const hole = H("9s 8d"), board = H("Ah Kd Ts 7c 2h");
+  const r = countOuts(hole, board);
+  eq("S2b total (published 23)", r.total, 23);
+  const outkick = r.breakdown.filter((b) => /Out-kick/.test(b.label)).reduce((a, b) => a + b.count, 0);
+  eq("S2b out-kick outs (J,Q x4)", outkick, 8);
+  assert("S2b fold", r.fold === true);
 }
 
 // Scenario 3: The nuts — player has a straight flush, zero outs.
@@ -93,9 +105,9 @@ eq("describe two pair", describeScore(score5(H("Ks Kh 9d 9c 2s"))), "Two Pair, K
 }
 
 // Scenario 4: Player no pair, plays the board almost. hole 3d 2c, board As Kh Qd 7c 4s.
-// player best = A K Q 7 4 high. Many cards beat: any pair of board (A,K,Q,7,4 -> 3 each=15),
-// overcards J/T/9/8 that raise 5th card above 4 or 7... single J -> A K Q J 7 beats A K Q 7 4? yes.
-// plus pocket pairs any rank not on board. -> huge -> FOLD.
+// player best = A K Q 7 4 high. Many cards beat: any board pair (A,K,Q,7,4 -> 3 each=15)
+// plus out-kick overcards J/T/9/8/6/5 that raise a kicker above 4 or 7
+// (single J -> A K Q J 7 beats A K Q 7 4). -> well over 21 -> FOLD.
 {
   const hole = H("3d 2c"), board = H("As Kh Qd 7c 4s");
   const r = countOuts(hole, board);
