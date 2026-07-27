@@ -17,11 +17,8 @@
 export const FIREBASE = {
   
 apiKey: "AIzaSyChHi-0fBvzIb7DYlWcpJQcANCGeZnRPTI",
-authDomain: "pokertraining-c9884.firebaseapp.com",
 databaseURL: "https://pokertraining-c9884-default-rtdb.europe-west1.firebasedatabase.app",
 projectId: "pokertraining-c9884",
-storageBucket: "pokertraining-c9884.firebasestorage.app",
-messagingSenderId: "264063940743",
 appId: "1:264063940743:web:ab961bbbe483cdd016a022"
 };
 
