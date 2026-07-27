@@ -684,13 +684,13 @@ function StatsPanel({ stats, pct, avgErr, onReset, float }) {
 
       <div className="uth-stat-grid">
         <Stat k="Rounds" v={stats.rounds} />
-        <Stat k="Points" v={stats.points} />
         <Stat k="Streak" v={stats.streak} sub={`best ${stats.bestStreak}`} />
         <Stat k="Avg error" v={avgErr} sub="outs" />
-        <Stat k="Exact" v={stats.exact} sub={`${pct(stats.exact)}%`} tone="exact" />
-        <Stat k="Close (±2)" v={stats.close} sub={`${pct(stats.close)}%`} tone="close" />
-        <Stat k="Off" v={stats.off} sub={`${pct(stats.off)}%`} tone="off" />
         <Stat k="Right side" v={stats.correctSide} sub={`of ${stats.rounds}`} tone="side" />
+        <Stat k="Points" v={stats.points} secondary />
+        <Stat k="Exact" v={stats.exact} sub={`${pct(stats.exact)}%`} tone="exact" secondary />
+        <Stat k="Close (±2)" v={stats.close} sub={`${pct(stats.close)}%`} tone="close" secondary />
+        <Stat k="Off" v={stats.off} sub={`${pct(stats.off)}%`} tone="off" secondary />
       </div>
 
       <div className="uth-help">
@@ -704,9 +704,9 @@ function StatsPanel({ stats, pct, avgErr, onReset, float }) {
   );
 }
 
-function Stat({ k, v, sub, tone }) {
+function Stat({ k, v, sub, tone, secondary }) {
   return (
-    <div className={`uth-stat ${tone ? `uth-stat--${tone}` : ""}`}>
+    <div className={`uth-stat ${tone ? `uth-stat--${tone}` : ""} ${secondary ? "uth-stat--secondary" : ""}`}>
       <span className="uth-stat-v">{v}</span>
       <span className="uth-stat-k">{k}</span>
       {sub != null ? <span className="uth-stat-sub">{sub}</span> : null}
@@ -1223,23 +1223,51 @@ html,body{margin:0;padding:0;background:#0b0d10}
   .uth-view--manual{grid-template-columns:1fr}
   .uth-view--manual .uth-stats{position:static}
 }
-/* Phones: a small landscape table + compact stats so the interactive part
-   (table + number pad) fits one screen and the stats sit just below it,
-   instead of the old full-height portrait table + tall stats panel. */
+/* Phones: a small landscape table + the session stats floating as a compact
+   HUD in the top-right (matching desktop). The header title is shrunk so it
+   shares the top row with the HUD. */
 @media(max-width:560px){
-  .uth-rail{max-width:400px;aspect-ratio:16/10.6}
+  .uth-rail{max-width:330px;aspect-ratio:16/10.6}
   .uth-betcircle{border-width:1px}
   .uth-view--practice .uth-main{gap:8px}
-  /* compact stats: drop the explainer paragraphs, tighten everything */
-  .uth-help{display:none}
-  .uth-stats{gap:8px;padding:10px}
-  .uth-stats-head h2{font-size:13px}
-  .uth-headline{padding:8px}
-  .uth-headline-v{font-size:23px}
-  .uth-headline-k{font-size:10px}
-  .uth-stat{padding:6px 8px}
-  .uth-stat-v{font-size:16px}
+  /* shrink the header so the floating HUD has room on the right */
+  .uth-topbar{flex-direction:column;align-items:flex-start;gap:8px}
+  .uth-brand{gap:9px}
+  .uth-brand-mark{width:32px;height:32px;font-size:15px;border-radius:9px}
+  .uth-brand h1{font-size:15px;line-height:1.1}
+  .uth-brand p{display:none}
+  .uth-modes button{padding:7px 14px;font-size:13px}
   .uth-foot{font-size:10px;padding-top:6px}
+  /* compact stats everywhere on phones */
+  .uth-help{display:none}
+  .uth-stats{gap:7px;padding:9px}
+  .uth-stats-head h2{font-size:12px}
+  .uth-headline{padding:6px}
+  .uth-headline-v{font-size:20px}
+  .uth-headline-k{font-size:9px}
+  .uth-stat{padding:4px 6px}
+  .uth-stat-v{font-size:14px}
+  .uth-stat-k{font-size:8px}
+  .uth-stat-sub{font-size:8px}
+  /* float the practice stats HUD in the top-right corner. Keep it SHORT so it
+     stays above the community cards: show the headline + 4 key stats only,
+     hiding the secondary tiles (points/exact/close/off). */
+  .uth-view--practice .uth-stats--float{
+    position:fixed;top:6px;right:6px;width:41vw;max-width:150px;margin:0;z-index:50;
+    padding:7px;gap:6px;
+    box-shadow:0 12px 30px rgba(0,0,0,.6);border-color:#33465b;
+  }
+  .uth-view--practice .uth-stats--float .uth-stat--secondary{display:none}
+  .uth-view--practice .uth-stats--float .uth-stat-sub{display:none}
+  .uth-view--practice .uth-stats--float .uth-stats-head h2{font-size:10px;letter-spacing:.3px;text-transform:uppercase}
+  .uth-view--practice .uth-stats--float .uth-headline{padding:4px}
+  .uth-view--practice .uth-stats--float .uth-headline-v{font-size:17px}
+  .uth-view--practice .uth-stats--float .uth-headline-k{font-size:8px}
+  .uth-view--practice .uth-stats--float .uth-stat-grid{gap:4px}
+  .uth-view--practice .uth-stats--float .uth-stat{padding:3px 6px}
+  .uth-view--practice .uth-stats--float .uth-stat-v{font-size:13px;line-height:1.05}
+  .uth-view--practice .uth-stats--float .uth-stat-k{font-size:7px}
+  .uth-view--practice .uth-stats--float .uth-reset{padding:2px 6px;font-size:9px}
 }
 @media(max-width:420px){
   .uth-app{padding:10px;gap:8px}
