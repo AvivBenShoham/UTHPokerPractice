@@ -1223,17 +1223,33 @@ html,body{margin:0;padding:0;background:#0b0d10}
   .uth-view--manual{grid-template-columns:1fr}
   .uth-view--manual .uth-stats{position:static}
 }
+/* Phones: a small landscape table + compact stats so the interactive part
+   (table + number pad) fits one screen and the stats sit just below it,
+   instead of the old full-height portrait table + tall stats panel. */
 @media(max-width:560px){
-  /* taller table so the betting circles keep clear of the cards on phones */
-  .uth-rail{aspect-ratio:4/4.5;max-width:440px}
-  .uth-board{top:46%}
+  .uth-rail{max-width:400px;aspect-ratio:16/10.6}
   .uth-betcircle{border-width:1px}
+  .uth-view--practice .uth-main{gap:8px}
+  /* compact stats: drop the explainer paragraphs, tighten everything */
+  .uth-help{display:none}
+  .uth-stats{gap:8px;padding:10px}
+  .uth-stats-head h2{font-size:13px}
+  .uth-headline{padding:8px}
+  .uth-headline-v{font-size:23px}
+  .uth-headline-k{font-size:10px}
+  .uth-stat{padding:6px 8px}
+  .uth-stat-v{font-size:16px}
+  .uth-foot{font-size:10px;padding-top:6px}
 }
 @media(max-width:420px){
-  .uth-app{padding:10px}
+  .uth-app{padding:10px;gap:8px}
+  .uth-brand-mark{width:38px;height:38px;font-size:17px}
   .uth-brand h1{font-size:16px}
-  .uth-vs-v{font-size:24px}
-  .uth-guess-num{font-size:36px}
+  .uth-brand p{font-size:11px}
+  .uth-vs-v{font-size:22px}
+  .uth-guess-num{font-size:24px}
   .uth-betcircles{gap:6px}
+  /* full-width number pad on small phones for easy tapping */
+  .uth-pad{max-width:none}
 }
 `;
