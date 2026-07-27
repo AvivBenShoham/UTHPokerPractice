@@ -507,12 +507,10 @@ export default function UTHOutsTrainer() {
       )}
 
       <footer className="uth-foot">
-        Convention: a dealer out is any single unseen card whose best 5 with the
-        board beats you &mdash; board pairs, out-kicking overcards, and 4-card
-        flush &amp; straight fills. Per the published 21-rule, dealer{" "}
-        <b>pocket pairs are not counted</b> as separate outs (a pocket pair is a
-        two-card holding, not single-card outs).{" "}
-        <b>21+ outs &rarr; FOLD, 20 or fewer &rarr; BET&nbsp;1&times;.</b>
+        A dealer out = any single unseen card whose best 5 with the board beats
+        you (board pairs, out-kicking overcards, 4-card flush/straight fills);
+        dealer <b>pocket pairs are not counted</b>. <b>21+ &rarr; FOLD, &le;20
+        &rarr; BET&nbsp;1&times;.</b>
       </footer>
     </div>
   );
@@ -526,8 +524,8 @@ function PracticeView({
   stats, pct, avgErr, onReset,
 }) {
   return (
-    <div className="uth-layout">
-      <div className="uth-main">
+    <div className="uth-view uth-view--practice">
+      <div className={`uth-main ${result ? "uth-main--result" : ""}`}>
         <PokerTable
           hole={scenario.hole}
           board={scenario.board}
@@ -539,7 +537,7 @@ function PracticeView({
           <div className="uth-guess-dock">
             <div className="uth-prompt">
               <span className="uth-prompt-q">
-                How many of the 45 unseen cards beat you?
+                Unseen cards that beat you?
               </span>
               <div className="uth-guess-display">
                 <span className="uth-guess-num">{guess === "" ? "–" : guess}</span>
@@ -557,7 +555,7 @@ function PracticeView({
         )}
       </div>
 
-      <StatsPanel stats={stats} pct={pct} avgErr={avgErr} onReset={onReset} />
+      <StatsPanel stats={stats} pct={pct} avgErr={avgErr} onReset={onReset} float />
     </div>
   );
 }
@@ -671,9 +669,9 @@ function OutsBreakdown({ truth }) {
   );
 }
 
-function StatsPanel({ stats, pct, avgErr, onReset }) {
+function StatsPanel({ stats, pct, avgErr, onReset, float }) {
   return (
-    <aside className="uth-stats">
+    <aside className={`uth-stats ${float ? "uth-stats--float" : ""}`}>
       <div className="uth-stats-head">
         <h2>Session stats</h2>
         <button className="uth-reset" onClick={onReset}>Reset</button>
@@ -794,7 +792,7 @@ function ManualView({
   ];
 
   return (
-    <div className="uth-layout">
+    <div className="uth-view uth-view--manual">
       <div className="uth-main">
         <PokerTable
           hole={[manualHole[0] || { r: 2, s: "s" }, manualHole[1] || { r: 2, s: "s" }].map((c, i) =>
@@ -901,6 +899,7 @@ function CardPalette({ manualUsed, onAssign }) {
 //  STYLES
 // ===========================================================================
 const STYLES = `
+html,body{margin:0;padding:0;background:#0b0d10}
 :root{
   --felt:#0c7a45; --felt-dark:#075130; --felt-edge:#053a22;
   --rail:#4a2f1c; --rail-hi:#6b4326; --rail-lo:#2c1a0f;
@@ -917,7 +916,7 @@ const STYLES = `
   background:
     radial-gradient(1200px 700px at 50% -10%, #1a2836 0%, var(--bg0) 60%),
     var(--bg0);
-  padding:14px; display:flex; flex-direction:column; gap:14px;
+  padding:12px; display:flex; flex-direction:column; gap:10px;
 }
 /* ---------- top bar ---------- */
 .uth-topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
@@ -939,14 +938,33 @@ const STYLES = `
 .uth-modes button:not(.is-active):hover{color:var(--txt)}
 
 /* ---------- layout ---------- */
-.uth-layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;align-items:start}
-.uth-main{min-width:0;display:flex;flex-direction:column;gap:14px}
+/* Practice: single centered column; stats float top-right on desktop. */
+.uth-view--practice{display:block}
+.uth-view--practice .uth-main{min-width:0;max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+/* In result mode the table shrinks (just a hand reminder) so the verdict +
+   breakdown fit on screen; declutter the betting circles / chips there. */
+.uth-view--practice .uth-main--result .uth-rail{max-width:360px;aspect-ratio:16/8.6}
+.uth-view--practice .uth-main--result .uth-card{width:clamp(26px,5vw,42px)}
+.uth-view--practice .uth-main--result .uth-card--sm{width:clamp(20px,3.6vw,30px)}
+.uth-view--practice .uth-main--result .uth-betcircles,
+.uth-view--practice .uth-main--result .uth-chipstack,
+.uth-view--practice .uth-main--result .uth-logo,
+.uth-view--manual .uth-betcircles,
+.uth-view--manual .uth-chipstack,
+.uth-view--manual .uth-logo{display:none}
+.uth-view--practice .uth-main--result .uth-board,
+.uth-view--manual .uth-board{top:36%}
+.uth-view--practice .uth-main--result .uth-seat-zone,
+.uth-view--manual .uth-seat-zone{bottom:9%}
+/* Manual: table/builder + side panel. */
+.uth-view--manual{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:14px;align-items:start}
+.uth-view--manual .uth-main{min-width:0;display:flex;flex-direction:column;gap:12px}
 
 /* ---------- poker table ---------- */
 .uth-table-wrap{width:100%;display:flex;justify-content:center}
 .uth-rail{
-  width:100%;max-width:760px;aspect-ratio:16/11;border-radius:50%/50%;
-  padding:min(3.4%,26px);
+  width:100%;max-width:500px;aspect-ratio:16/10;border-radius:50%/50%;
+  padding:min(3.4%,20px);
   background:
     linear-gradient(180deg,var(--rail-hi),var(--rail) 40%,var(--rail-lo));
   box-shadow:
@@ -976,9 +994,9 @@ const STYLES = `
   box-shadow:0 0 0 6px rgba(0,0,0,.06),inset 0 0 40px rgba(0,0,0,.25);
 }
 .uth-logo{
-  position:absolute;left:50%;top:30%;transform:translate(-50%,-50%);
-  text-align:center;font-weight:800;letter-spacing:2px;line-height:1.35;
-  font-size:clamp(9px,1.9vw,15px);color:rgba(231,198,90,.16);pointer-events:none;
+  position:absolute;left:50%;top:23%;transform:translate(-50%,-50%);
+  text-align:center;font-weight:800;letter-spacing:2px;line-height:1.3;
+  font-size:clamp(8px,1.6vw,13px);color:rgba(231,198,90,.15);pointer-events:none;
 }
 .uth-seatlabel{
   font-size:clamp(8px,1.5vw,11px);letter-spacing:2px;font-weight:800;
@@ -998,15 +1016,15 @@ const STYLES = `
 
 /* board */
 .uth-board{
-  position:absolute;left:50%;top:49%;transform:translate(-50%,-50%);
+  position:absolute;left:50%;top:37%;transform:translate(-50%,-50%);
   display:flex;gap:clamp(4px,1.2vw,10px);
 }
 
 /* seat zone */
-.uth-seat-zone{position:absolute;left:50%;bottom:5%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;width:86%}
-.uth-betcircles{display:flex;gap:clamp(4px,1.4vw,12px);justify-content:center;margin-bottom:2px}
+.uth-seat-zone{position:absolute;left:50%;bottom:4%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;width:86%}
+.uth-betcircles{display:flex;gap:clamp(4px,1.4vw,10px);justify-content:center;margin-bottom:1px}
 .uth-betcircle{
-  width:clamp(30px,6.2vw,50px);height:clamp(30px,6.2vw,50px);border-radius:50%;
+  width:clamp(22px,4.6vw,32px);height:clamp(22px,4.6vw,32px);border-radius:50%;
   border:1.5px dashed rgba(231,198,90,.5);display:grid;place-items:center;position:relative;
   font-size:clamp(7px,1.4vw,10px);letter-spacing:.5px;color:rgba(255,255,255,.72);font-weight:700;
   background:radial-gradient(circle at 50% 30%,rgba(0,0,0,.12),rgba(0,0,0,.28));
@@ -1027,23 +1045,23 @@ const STYLES = `
 /* ---------- cards ---------- */
 .uth-card-slot{display:inline-flex}
 .uth-card{
-  width:clamp(38px,7.6vw,62px);aspect-ratio:5/7;border-radius:8px;position:relative;
-  background:var(--paper);box-shadow:0 6px 14px rgba(0,0,0,.4),inset 0 0 0 1px rgba(0,0,0,.08);
+  width:clamp(30px,6.2vw,50px);aspect-ratio:5/7;border-radius:7px;position:relative;
+  background:var(--paper);box-shadow:0 5px 12px rgba(0,0,0,.4),inset 0 0 0 1px rgba(0,0,0,.08);
   overflow:hidden;transform-origin:center;
   animation:uthDeal .5s cubic-bezier(.2,.9,.25,1) both;
 }
-.uth-card--sm{width:clamp(30px,5.2vw,42px)}
+.uth-card--sm{width:clamp(24px,4.4vw,36px)}
 .uth-card--red{color:var(--red)}
 .uth-card--black{color:var(--black)}
 .uth-card--dim{opacity:.5}
 .uth-card--hi{box-shadow:0 6px 16px rgba(0,0,0,.45),0 0 0 2px var(--gold),inset 0 0 0 1px rgba(0,0,0,.08)}
 .uth-card-face{position:absolute;inset:0}
 .uth-corner{position:absolute;display:flex;flex-direction:column;align-items:center;line-height:.92;font-weight:800}
-.uth-corner b{font-size:clamp(11px,2.3vw,17px)}
-.uth-corner i{font-size:clamp(8px,1.7vw,12px);font-style:normal;margin-top:1px}
-.uth-corner--tl{top:4px;left:5px}
-.uth-corner--br{bottom:4px;right:5px;transform:rotate(180deg)}
-.uth-pip{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:clamp(18px,4.2vw,30px)}
+.uth-corner b{font-size:clamp(10px,2vw,14px)}
+.uth-corner i{font-size:clamp(7px,1.4vw,10px);font-style:normal;margin-top:1px}
+.uth-corner--tl{top:3px;left:4px}
+.uth-corner--br{bottom:3px;right:4px;transform:rotate(180deg)}
+.uth-pip{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:clamp(15px,3.4vw,24px)}
 .uth-card--empty{background:rgba(255,255,255,.05);border:2px dashed rgba(255,255,255,.25);box-shadow:none;
   display:grid;place-items:center;color:rgba(255,255,255,.4);font-size:11px;animation:none}
 .uth-card-back{position:absolute;inset:0;border-radius:8px;
@@ -1060,71 +1078,71 @@ const STYLES = `
 /* ---------- guess dock ---------- */
 .uth-guess-dock{
   background:linear-gradient(180deg,var(--panel),var(--panel2));
-  border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:14px;
+  border:1px solid var(--line);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;
 }
-.uth-prompt{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
-.uth-prompt-q{color:var(--muted);font-size:14px;font-weight:600}
-.uth-guess-display{display:flex;align-items:baseline;gap:8px}
-.uth-guess-num{font-size:44px;font-weight:800;color:var(--gold);min-width:64px;text-align:center;
+.uth-prompt{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.uth-prompt-q{color:var(--muted);font-size:13px;font-weight:600}
+.uth-guess-display{display:flex;align-items:baseline;gap:6px}
+.uth-guess-num{font-size:26px;font-weight:800;color:var(--gold);min-width:38px;text-align:right;
   font-variant-numeric:tabular-nums}
-.uth-guess-unit{color:var(--muted);font-size:15px;font-weight:600}
-.uth-pad{display:flex;flex-direction:column;gap:10px;max-width:340px;width:100%;margin:0 auto}
-.uth-pad-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.uth-guess-unit{color:var(--muted);font-size:13px;font-weight:600}
+.uth-pad{display:flex;flex-direction:column;gap:6px;max-width:300px;width:100%;margin:0 auto}
+.uth-pad-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 .uth-key{
   border:1px solid var(--line);background:linear-gradient(180deg,#232c38,#1a212b);color:var(--txt);
-  font-size:20px;font-weight:700;padding:14px 0;border-radius:12px;cursor:pointer;transition:.12s;
+  font-size:17px;font-weight:700;padding:8px 0;border-radius:9px;cursor:pointer;transition:.12s;
   box-shadow:0 2px 0 rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.05);
 }
 .uth-key:hover{transform:translateY(-1px);border-color:#3a4a5e}
 .uth-key:active{transform:translateY(1px)}
-.uth-key--fn{font-size:15px;color:var(--muted)}
+.uth-key--fn{font-size:14px;color:var(--muted)}
 .uth-key--submit{
-  background:linear-gradient(180deg,var(--gold),var(--gold-dim));color:#20160a;font-size:16px;
+  background:linear-gradient(180deg,var(--gold),var(--gold-dim));color:#20160a;font-size:15px;padding:10px 0;
   border-color:transparent;box-shadow:0 4px 14px rgba(231,198,90,.28);
 }
 .uth-key--submit:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
 .uth-deal-next{margin-top:2px}
 
 /* ---------- result ---------- */
-.uth-result{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:14px;animation:uthRise .3s ease both}
+.uth-result{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:10px;animation:uthRise .3s ease both}
 @keyframes uthRise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-.uth-verdict{border-radius:14px;padding:14px;border:1px solid var(--line);
+.uth-verdict{border-radius:12px;padding:10px 12px;border:1px solid var(--line);
   background:radial-gradient(120% 140% at 0% 0%, rgba(90,169,230,.10), rgba(0,0,0,0))}
 .uth-verdict--exact{box-shadow:inset 0 0 0 1px rgba(62,207,142,.4)}
 .uth-verdict--wrongside{background:radial-gradient(120% 140% at 0% 0%, rgba(239,91,100,.16), rgba(0,0,0,0))}
-.uth-verdict-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
-.uth-badge{padding:6px 12px;border-radius:999px;font-weight:800;font-size:13px;letter-spacing:.3px}
+.uth-verdict-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+.uth-badge{padding:5px 10px;border-radius:999px;font-weight:800;font-size:12px;letter-spacing:.3px}
 .uth-badge--exact{background:rgba(62,207,142,.16);color:var(--ok);box-shadow:inset 0 0 0 1px rgba(62,207,142,.5)}
 .uth-badge--close{background:rgba(240,180,41,.16);color:var(--warn);box-shadow:inset 0 0 0 1px rgba(240,180,41,.5)}
 .uth-badge--off{background:rgba(239,91,100,.14);color:var(--bad);box-shadow:inset 0 0 0 1px rgba(239,91,100,.45)}
 .uth-badge--side-ok{background:rgba(62,207,142,.16);color:var(--ok);box-shadow:inset 0 0 0 1px rgba(62,207,142,.5)}
 .uth-badge--side-bad{background:rgba(239,91,100,.18);color:var(--bad);box-shadow:inset 0 0 0 1px rgba(239,91,100,.6)}
-.uth-earned{margin-left:auto;font-weight:800;color:var(--gold);font-size:16px}
-.uth-guess-vs{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.uth-vs-cell{display:flex;flex-direction:column;gap:2px;min-width:70px}
-.uth-vs-k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-.uth-vs-v{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums}
+.uth-earned{margin-left:auto;font-weight:800;color:var(--gold);font-size:15px}
+.uth-guess-vs{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.uth-vs-cell{display:flex;flex-direction:column;gap:1px;min-width:60px}
+.uth-vs-k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.uth-vs-v{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
 .uth-vs-v--true{color:var(--gold)}
 .uth-vs-sep{color:var(--muted);font-size:13px}
 .uth-vs-cell--diff{margin-left:auto;text-align:right}
-.uth-result-body{display:grid;grid-template-columns:1fr auto;gap:10px}
-.uth-you-have,.uth-action{background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;gap:3px}
-.uth-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-.uth-you-have strong{font-size:17px}
-.uth-action{align-items:center;text-align:center;min-width:120px}
-.uth-action strong{font-size:22px;font-weight:800}
+.uth-result-body{display:grid;grid-template-columns:1fr auto;gap:8px}
+.uth-you-have,.uth-action{background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:11px;padding:8px 12px;display:flex;flex-direction:column;gap:2px}
+.uth-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.uth-you-have strong{font-size:15px}
+.uth-action{align-items:center;text-align:center;min-width:110px}
+.uth-action strong{font-size:19px;font-weight:800}
 .uth-action--bet{box-shadow:inset 0 0 0 1px rgba(62,207,142,.45)}
 .uth-action--bet strong{color:var(--ok)}
 .uth-action--fold{box-shadow:inset 0 0 0 1px rgba(239,91,100,.5)}
 .uth-action--fold strong{color:var(--bad)}
 
 /* ---------- breakdown ---------- */
-.uth-breakdown{background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
-.uth-breakdown-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
-.uth-breakdown-head>span:first-child{font-weight:700;font-size:14px}
-.uth-breakdown-sub{font-size:11px;color:var(--muted)}
-.uth-break-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
-.uth-break-list li{display:flex;align-items:baseline;gap:8px;font-size:14px}
+.uth-breakdown{background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:11px;padding:9px 12px}
+.uth-breakdown-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.uth-breakdown-head>span:first-child{font-weight:700;font-size:13px}
+.uth-breakdown-sub{font-size:10px;color:var(--muted)}
+.uth-break-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;max-height:20vh;overflow:auto}
+.uth-break-list li{display:flex;align-items:baseline;gap:8px;font-size:13px}
 .uth-break-label{color:var(--txt)}
 .uth-break-dots{flex:1;border-bottom:1px dotted rgba(255,255,255,.2);transform:translateY(-3px)}
 .uth-break-count{font-weight:800;font-variant-numeric:tabular-nums;color:var(--gold)}
@@ -1133,25 +1151,27 @@ const STYLES = `
 .uth-break-empty{font-size:13px;color:var(--ok);background:rgba(62,207,142,.08);padding:10px;border-radius:8px}
 
 /* ---------- stats ---------- */
-.uth-stats{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:16px;padding:16px;position:sticky;top:14px;display:flex;flex-direction:column;gap:14px}
+.uth-stats{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:14px;padding:12px;position:sticky;top:14px;display:flex;flex-direction:column;gap:10px}
 .uth-stats-head{display:flex;justify-content:space-between;align-items:center}
-.uth-stats-head h2{margin:0;font-size:16px}
-.uth-reset{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:600;font-size:13px}
+.uth-stats-head h2{margin:0;font-size:14px}
+.uth-reset{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:4px 10px;cursor:pointer;font-weight:600;font-size:12px}
 .uth-reset:hover{color:var(--txt);border-color:#3a4a5e}
-.uth-headline{background:radial-gradient(120% 120% at 100% 0%,rgba(231,198,90,.16),rgba(0,0,0,0));border:1px solid rgba(231,198,90,.3);border-radius:12px;padding:14px;text-align:center;display:flex;flex-direction:column;gap:2px}
-.uth-headline-v{font-size:38px;font-weight:800;color:var(--gold);line-height:1;font-variant-numeric:tabular-nums}
-.uth-headline-k{font-size:12px;color:var(--muted);font-weight:600}
-.uth-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.uth-stat{background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:10px;padding:9px 11px;display:flex;flex-direction:column;gap:1px}
-.uth-stat-v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
-.uth-stat-k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
-.uth-stat-sub{font-size:11px;color:var(--muted)}
+.uth-headline{background:radial-gradient(120% 120% at 100% 0%,rgba(231,198,90,.16),rgba(0,0,0,0));border:1px solid rgba(231,198,90,.3);border-radius:11px;padding:9px;text-align:center;display:flex;flex-direction:column;gap:1px}
+.uth-headline-v{font-size:28px;font-weight:800;color:var(--gold);line-height:1;font-variant-numeric:tabular-nums}
+.uth-headline-k{font-size:11px;color:var(--muted);font-weight:600}
+.uth-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.uth-stat{background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:9px;padding:6px 9px;display:flex;flex-direction:column;gap:0}
+.uth-stat-v{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.2}
+.uth-stat-k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+.uth-stat-sub{font-size:10px;color:var(--muted)}
 .uth-stat--exact .uth-stat-v{color:var(--ok)}
 .uth-stat--close .uth-stat-v{color:var(--warn)}
 .uth-stat--off .uth-stat-v{color:var(--bad)}
 .uth-stat--side .uth-stat-v{color:var(--gold)}
-.uth-help{font-size:12px;color:var(--muted);line-height:1.5;display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.uth-help{font-size:11px;color:var(--muted);line-height:1.45;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:10px}
 .uth-help b{color:var(--txt)}
+/* practice: keep the static (narrow-screen) stats tidy and centered */
+.uth-view--practice .uth-stats{max-width:560px;margin:0 auto;position:static}
 
 /* ---------- manual ---------- */
 .uth-manual-dock{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:14px}
@@ -1185,13 +1205,23 @@ const STYLES = `
 .uth-manual-total-k{font-size:12px;color:var(--muted)}
 
 /* ---------- footer ---------- */
-.uth-foot{font-size:12px;color:var(--muted);line-height:1.6;text-align:center;border-top:1px solid var(--line);padding-top:12px;max-width:900px;margin:0 auto}
+.uth-foot{font-size:11px;color:var(--muted);line-height:1.5;text-align:center;border-top:1px solid var(--line);padding-top:8px;max-width:820px;margin:0 auto}
 .uth-foot b{color:var(--txt)}
 
 /* ---------- responsive ---------- */
+/* Desktop: float the session stats as a compact HUD in the top-right so the
+   whole practice screen fits without scrolling. */
+@media(min-width:1040px){
+  .uth-view--practice .uth-stats--float{
+    position:fixed;top:70px;right:14px;width:220px;margin:0;z-index:40;
+    max-height:calc(100vh - 84px);overflow:auto;
+    box-shadow:0 18px 44px rgba(0,0,0,.5);
+  }
+  .uth-view--practice .uth-stats--float .uth-help{display:none}
+}
 @media(max-width:900px){
-  .uth-layout{grid-template-columns:1fr}
-  .uth-stats{position:static}
+  .uth-view--manual{grid-template-columns:1fr}
+  .uth-view--manual .uth-stats{position:static}
 }
 @media(max-width:560px){
   /* taller table so the betting circles keep clear of the cards on phones */
