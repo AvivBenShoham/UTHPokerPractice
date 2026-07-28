@@ -313,7 +313,6 @@ export default function UTHOutsTrainer() {
 
   // player profile (name lives forever in localStorage)
   const [profile, setProfile] = useState(() => loadProfile());
-  const isAviv = (profile?.name || "").trim().toLowerCase() === "aviv";
 
   // scenario
   const [scenario, setScenario] = useState(() => dealRandomScenario());
@@ -402,7 +401,7 @@ export default function UTHOutsTrainer() {
       timeSum: d.timeSum + dMs,
       points: d.points + earned,
     }));
-    if (profile) setProfile(recordHand(profile)); // all-time count + shared sync
+    if (profile) setProfile(recordHand(profile, { correct: correctSide, timeMs: dMs }));
   }, [guess, truth, result, drillDone, handStart, profile]);
 
   const finishDrill = useCallback(() => setDrillDone(true), []);
@@ -556,15 +555,13 @@ export default function UTHOutsTrainer() {
           >
             Manual
           </button>
-          {isAviv && (
-            <button
-              className={`uth-modes-metrics ${mode === "metrics" ? "is-active" : ""}`}
-              onClick={() => setMode("metrics")}
-              title="Player metrics (admin)"
-            >
-              📊 Metrics
-            </button>
-          )}
+          <button
+            className={`uth-modes-metrics ${mode === "metrics" ? "is-active" : ""}`}
+            onClick={() => setMode("metrics")}
+            title="Player leaderboard"
+          >
+            📊 Metrics
+          </button>
           {profile && <span className="uth-whoami" title="Your name (saved on this device)">{profile.name}</span>}
         </nav>
       </header>
@@ -1149,7 +1146,7 @@ function MetricsPage({ me, onBack }) {
   const [players, setPlayers] = useState([]);
   const [state, setState] = useState("loading"); // loading | ok | error
   const [err, setErr] = useState("");
-  const [sortKey, setSortKey] = useState("hands24");
+  const [sortKey, setSortKey] = useState("allTime");
   const [sortDir, setSortDir] = useState("desc");
 
   const load = useCallback(() => {
@@ -1162,13 +1159,18 @@ function MetricsPage({ me, onBack }) {
 
   const now = Date.now();
   const rows = useMemo(() => {
-    const mapped = players.map((p) => ({
-      id: p.id,
-      name: p.name,
-      allTime: p.handsAllTime || 0,
-      last24: (p.recentHands || []).filter((t) => now - t < DAY_MS).length,
-      lastHandTs: p.lastHandTs || 0,
-    }));
+    const mapped = players.map((p) => {
+      const hands = p.handsAllTime || 0;
+      return {
+        id: p.id,
+        name: p.name,
+        allTime: hands,
+        last24: (p.recentHands || []).filter((t) => now - t < DAY_MS).length,
+        success: hands ? Math.round((100 * (p.correctAll || 0)) / hands) : 0,
+        avgTimeMs: hands ? (p.timeSumAll || 0) / hands : 0,
+        lastHandTs: p.lastHandTs || 0,
+      };
+    });
     const dir = sortDir === "asc" ? 1 : -1;
     mapped.sort((a, b) => {
       let av = a[sortKey], bv = b[sortKey];
@@ -1191,6 +1193,8 @@ function MetricsPage({ me, onBack }) {
     { key: "name", label: "Player", align: "left" },
     { key: "allTime", label: "Hands (all-time)", align: "right" },
     { key: "last24", label: "Hands (24h)", align: "right" },
+    { key: "success", label: "Success %", align: "right" },
+    { key: "avgTimeMs", label: "Avg time", align: "right" },
     { key: "lastHandTs", label: "Last hand", align: "right" },
   ];
 
@@ -1198,7 +1202,7 @@ function MetricsPage({ me, onBack }) {
     <div className="uth-metrics">
       <div className="uth-metrics-head">
         <div>
-          <span className="uth-summary-kicker">Admin</span>
+          <span className="uth-summary-kicker">Leaderboard</span>
           <h2>Player metrics</h2>
         </div>
         <div className="uth-metrics-actions">
@@ -1248,9 +1252,9 @@ function MetricsPage({ me, onBack }) {
           </thead>
           <tbody>
             {state === "loading" ? (
-              <tr><td className="uth-td-empty" colSpan={4}>Loading…</td></tr>
+              <tr><td className="uth-td-empty" colSpan={cols.length}>Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td className="uth-td-empty" colSpan={4}>No players yet.</td></tr>
+              <tr><td className="uth-td-empty" colSpan={cols.length}>No players yet.</td></tr>
             ) : (
               rows.map((r) => (
                 <tr key={r.id} className={me && r.id === me.deviceId ? "is-me" : ""}>
@@ -1259,6 +1263,8 @@ function MetricsPage({ me, onBack }) {
                   </td>
                   <td className="uth-td uth-td--right">{r.allTime}</td>
                   <td className="uth-td uth-td--right">{r.last24}</td>
+                  <td className="uth-td uth-td--right">{r.allTime ? `${r.success}%` : "–"}</td>
+                  <td className="uth-td uth-td--right">{r.allTime ? fmtTime(r.avgTimeMs) : "–"}</td>
                   <td className="uth-td uth-td--right" title={r.lastHandTs ? new Date(r.lastHandTs).toLocaleString() : ""}>
                     {relTime(r.lastHandTs)}
                   </td>
@@ -1636,7 +1642,7 @@ html,body{margin:0;padding:0;background:#0b0d10}
 .uth-metrics-note--err{background:rgba(239,91,100,.08);border-color:rgba(239,91,100,.35);color:var(--bad)}
 .uth-metrics-totals{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .uth-table-wrap2{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
-.uth-table{width:100%;border-collapse:collapse;font-size:14px;min-width:420px}
+.uth-table{width:100%;border-collapse:collapse;font-size:14px;min-width:600px}
 .uth-th{padding:11px 14px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);background:rgba(0,0,0,.25);cursor:pointer;user-select:none;white-space:nowrap;border-bottom:1px solid var(--line)}
 .uth-th:hover{color:var(--txt)}
 .uth-th.is-sorted{color:var(--gold)}
