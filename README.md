@@ -66,6 +66,13 @@ to `players`. Lock it down later with Firebase App Check if needed.)
   the felt number pad, lock it in, and get scored. A stats panel tracks rounds,
   exact/close/off buckets, decision-side accuracy, average error, streak, and
   points (all in memory; Reset clears them).
+- **Play (chips)** — play whole Ultimate Texas Hold'em hands for chips. Buy in
+  (min 50) and pick an ante, then make the real strategy decisions: raise **4×**
+  (or 3×) pre-flop, **2×** on the flop, and **1×** or fold on the river, against
+  a dealer that must qualify with a pair. Full UTH payouts (ante / blind pay
+  table / play), a running **bankroll**, and **session + all-time chip P&L**.
+  Every hand also grades your decisions against basic strategy and feeds your
+  stats (a "correct" hand = every street played optimally).
 - **Manual** — build any specific 2 hole + 5 board scenario from the card
   palette (or hit Random) and analyze the exact out count and breakdown.
 

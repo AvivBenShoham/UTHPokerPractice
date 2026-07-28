@@ -53,14 +53,16 @@ export function createProfile(name) {
     lastHandTs: 0,
     recentHands: [], // timestamps within the last 24h
     timeSumAll: 0, // total decision time (ms) across all hands
-    correctAll: 0, // hands landed on the correct side of 21
+    correctAll: 0, // hands played with correct strategy
+    chipsNetAll: 0, // lifetime chip profit/loss from the Play (chips) mode
   };
   saveProfile(p);
   return p;
 }
 
 // Record one completed hand: update local storage + push to the database.
-// `outcome` = { correct: boolean, timeMs: number } for the just-decided hand.
+// `outcome` = { correct: boolean, timeMs: number, chipsNet: number } (chipsNet
+// only for the chips game mode).
 export function recordHand(profile, outcome = {}) {
   if (!profile) return profile;
   const now = Date.now();
@@ -72,6 +74,7 @@ export function recordHand(profile, outcome = {}) {
     recentHands,
     timeSumAll: (profile.timeSumAll || 0) + (Number(outcome.timeMs) || 0),
     correctAll: (profile.correctAll || 0) + (outcome.correct ? 1 : 0),
+    chipsNetAll: (profile.chipsNetAll || 0) + (Number(outcome.chipsNet) || 0),
   };
   saveProfile(next);
   pushPlayer(next); // fire-and-forget
@@ -86,9 +89,10 @@ const toArray = (rh) => (Array.isArray(rh) ? rh.filter((x) => x != null) : rh ? 
 async function pushPlayer(p) {
   if (!isConfigured()) return;
   try {
+    // No Content-Type header: keeps this a CORS "simple" request (no preflight),
+    // which the Realtime Database REST endpoint handles cleanly from browsers.
     await fetch(nodeUrl(`players/${encodeURIComponent(p.deviceId)}`), {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: p.name,
         handsAllTime: p.handsAllTime || 0,
@@ -96,6 +100,7 @@ async function pushPlayer(p) {
         recentHands: p.recentHands || [],
         timeSumAll: p.timeSumAll || 0,
         correctAll: p.correctAll || 0,
+        chipsNetAll: p.chipsNetAll || 0,
       }),
     });
   } catch { /* offline / rules — ignore */ }
@@ -118,5 +123,6 @@ export async function fetchAllPlayers() {
     recentHands: toArray(v?.recentHands),
     timeSumAll: Number(v?.timeSumAll || 0),
     correctAll: Number(v?.correctAll || 0),
+    chipsNetAll: Number(v?.chipsNetAll || 0),
   }));
 }

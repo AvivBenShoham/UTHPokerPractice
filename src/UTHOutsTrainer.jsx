@@ -223,6 +223,73 @@ function dealRandomScenario() {
   return { hole: deck.slice(0, 2), board: deck.slice(2, 7) };
 }
 
+// Deal a full UTH hand: 2 player + 2 dealer hole cards + 5 board cards.
+function dealFullHand() {
+  const deck = makeDeck();
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return {
+    playerHole: deck.slice(0, 2),
+    dealerHole: deck.slice(2, 4),
+    board: deck.slice(4, 9),
+  };
+}
+
+// ===========================================================================
+//  FULL-GAME STRATEGY + PAYOUTS  (Ultimate Texas Hold'em basic strategy)
+//  Verified against the Wizard of Odds tables. See test coverage in scratch.
+// ===========================================================================
+// Pre-flop: raise 4x, else check. (3x is legal but never optimal.)
+function preflopRaise4x(hole) {
+  const hi = Math.max(hole[0].r, hole[1].r);
+  const lo = Math.min(hole[0].r, hole[1].r);
+  const suited = hole[0].s === hole[1].s;
+  if (hi === lo) return hi >= 3;                        // pair of 3s or higher
+  if (hi === 14) return true;                           // any ace
+  if (hi === 13) return suited ? true : lo >= 5;        // K suited any, offsuit K5+
+  if (hi === 12) return suited ? lo >= 6 : lo >= 8;     // Q suited Q6+, offsuit Q8+
+  if (hi === 11) return suited ? lo >= 8 : lo >= 10;    // J suited J8+, offsuit JT
+  return false;
+}
+// Flop (after a pre-flop check): raise 2x with two pair+, a hidden pair, or four
+// to a flush with a hole card 10+ of that suit.
+function flopRaise2x(hole, flop) {
+  const cards = [...hole, ...flop];
+  if (score5(cards)[0] >= CAT.TWO_PAIR) return true;
+  if (hole[0].r === hole[1].r) return true;             // pocket pair
+  const boardRanks = flop.map((c) => c.r);
+  if (hole.some((c) => boardRanks.includes(c.r))) return true; // hole pairs board
+  const bySuit = {};
+  for (const c of cards) (bySuit[c.s] = bySuit[c.s] || []).push(c);
+  for (const s in bySuit) {
+    if (bySuit[s].length >= 4 && hole.some((c) => c.s === s && c.r >= 10)) return true;
+  }
+  return false;
+}
+// Blind bet pay table — multiplier applied when the player WINS with this hand.
+function blindMult(score) {
+  switch (score[0]) {
+    case CAT.STRAIGHT_FLUSH: return score[1] === 14 ? 500 : 50;
+    case CAT.QUADS: return 10;
+    case CAT.FULL_HOUSE: return 3;
+    case CAT.FLUSH: return 1.5;
+    case CAT.STRAIGHT: return 1;
+    default: return 0; // less than a straight -> blind pushes on a win
+  }
+}
+// Settle a hand. playMult = 4/3/2/1 (play bet size); folded => lose ante+blind.
+function settleHand({ playerBest, dealerBest, ante, playMult, folded }) {
+  if (folded) return { ante: -ante, blind: -ante, play: 0, net: -2 * ante, folded: true };
+  const dealerQualifies = dealerBest[0] >= CAT.PAIR;
+  const cmp = cmpScore(playerBest, dealerBest); // >0 player wins
+  const play = cmp > 0 ? playMult * ante : cmp < 0 ? -playMult * ante : 0;
+  const anteR = !dealerQualifies ? 0 : cmp > 0 ? ante : cmp < 0 ? -ante : 0;
+  const blindR = cmp > 0 ? blindMult(playerBest) * ante : cmp < 0 ? -ante : 0;
+  return { ante: anteR, blind: blindR, play, net: anteR + blindR + play, dealerQualifies, cmp, folded: false };
+}
+
 // ===========================================================================
 //  PRESENTATIONAL SUBCOMPONENTS
 // ===========================================================================
@@ -265,11 +332,12 @@ function EmptyCard({ label }) {
   );
 }
 
-function BetCircle({ label, chips }) {
+function BetCircle({ label, chips, amount }) {
+  const has = amount != null && amount > 0;
   return (
-    <div className="uth-betcircle">
+    <div className={`uth-betcircle ${has ? "is-bet" : ""}`}>
       <span>{label}</span>
-      {chips ? <div className="uth-mini-chip" /> : null}
+      {has ? <b className="uth-betcircle-amt">{amount}</b> : chips ? <div className="uth-mini-chip" /> : null}
     </div>
   );
 }
@@ -330,6 +398,11 @@ export default function UTHOutsTrainer() {
   const [drill, setDrill] = useState(EMPTY_DRILL);
   const [drillNo, setDrillNo] = useState(1);
   const [drillDone, setDrillDone] = useState(false); // show the drill summary
+
+  // chips game (full UTH)
+  const [chip, setChip] = useState(null); // null = not seated; else { buyIn, ante, bankroll }
+  const [game, setGame] = useState(null); // current hand
+  const [playDealKey, setPlayDealKey] = useState(1);
 
   // manual builder
   const [manualHole, setManualHole] = useState([null, null]);
@@ -411,6 +484,59 @@ export default function UTHOutsTrainer() {
     setDrillDone(false);
     dealNext();
   }, [dealNext]);
+
+  // -------- chips game (full UTH) --------
+  const dealPlayHand = useCallback(() => {
+    setGame({
+      ...dealFullHand(),
+      street: "preflop", playMult: 0, folded: false,
+      decisions: [], result: null, dealtAt: Date.now(),
+    });
+    setPlayDealKey((k) => k + 1);
+  }, []);
+
+  const sitDown = useCallback((amount, ante) => {
+    setChip({ buyIn: amount, ante, bankroll: amount });
+    dealPlayHand();
+  }, [dealPlayHand]);
+
+  const cashOut = useCallback(() => { setChip(null); setGame(null); }, []);
+
+  const playDecide = useCallback((action) => {
+    if (!game || !chip || game.street === "showdown") return;
+    const { playerHole, dealerHole, board, street } = game;
+    let optimal, nextStreet = street, playMult = game.playMult, folded = game.folded, showdown = false;
+    if (street === "preflop") {
+      optimal = preflopRaise4x(playerHole) ? "4x" : "check";
+      if (action === "check") nextStreet = "flop";
+      else { playMult = action === "4x" ? 4 : 3; showdown = true; }
+    } else if (street === "flop") {
+      optimal = flopRaise2x(playerHole, board.slice(0, 3)) ? "2x" : "check";
+      if (action === "check") nextStreet = "river";
+      else { playMult = 2; showdown = true; }
+    } else {
+      optimal = countOuts(playerHole, board).fold ? "fold" : "1x";
+      if (action === "fold") { folded = true; showdown = true; }
+      else { playMult = 1; showdown = true; }
+    }
+    const decisions = [...game.decisions, { street, action, optimal, correct: action === optimal }];
+    if (!showdown) { setGame({ ...game, decisions, street: nextStreet }); return; }
+
+    const playerBest = bestScore([...playerHole, ...board]);
+    const dealerBest = bestScore([...dealerHole, ...board]);
+    const s = settleHand({ playerBest, dealerBest, ante: chip.ante, playMult, folded });
+    const allCorrect = decisions.every((d) => d.correct);
+    setChip((c) => ({ ...c, bankroll: c.bankroll + s.net }));
+    if (profile) setProfile(recordHand(profile, { correct: allCorrect, timeMs: Date.now() - game.dealtAt, chipsNet: s.net }));
+    setGame({
+      ...game, decisions, playMult, folded, street: "showdown",
+      result: {
+        settlement: s, allCorrect,
+        playerLabel: describeScore(playerBest),
+        dealerLabel: describeScore(dealerBest),
+      },
+    });
+  }, [game, chip, profile]);
 
   const onPad = useCallback(
     (key) => {
@@ -550,6 +676,13 @@ export default function UTHOutsTrainer() {
             Practice
           </button>
           <button
+            className={`uth-modes-play ${mode === "play" ? "is-active" : ""}`}
+            onClick={() => setMode("play")}
+            title="Play full Ultimate Texas Hold'em with chips"
+          >
+            ♠ Play
+          </button>
+          <button
             className={mode === "manual" ? "is-active" : ""}
             onClick={() => setMode("manual")}
           >
@@ -568,6 +701,17 @@ export default function UTHOutsTrainer() {
 
       {mode === "metrics" ? (
         <MetricsPage me={profile} onBack={() => setMode("practice")} />
+      ) : mode === "play" ? (
+        <PlayView
+          chip={chip}
+          game={game}
+          dealKey={playDealKey}
+          totalChips={profile?.chipsNetAll || 0}
+          onSit={sitDown}
+          onDecide={playDecide}
+          onNextHand={dealPlayHand}
+          onCashOut={cashOut}
+        />
       ) : mode === "practice" ? (
         <PracticeView
           scenario={scenario}
@@ -919,7 +1063,11 @@ function DrillSummary({ drill, drillNo, drillLen, onNewDrill }) {
 // ===========================================================================
 //  POKER TABLE (shared visual)
 // ===========================================================================
-function PokerTable({ hole, board, dealKey, revealResult }) {
+function PokerTable({
+  hole, board, dealKey, revealResult,
+  dealerCards, dealerFaceUp, boardShown, bets, dealerLabel,
+}) {
+  const shown = boardShown == null ? board.length : boardShown;
   return (
     <div className="uth-table-wrap">
       <div className="uth-rail">
@@ -928,32 +1076,54 @@ function PokerTable({ hole, board, dealKey, revealResult }) {
           <div className="uth-logo">ULTIMATE<br />TEXAS HOLD&rsquo;EM</div>
 
           <div className="uth-dealer-zone">
-            <div className="uth-seatlabel">DEALER</div>
+            <div className="uth-seatlabel">{dealerLabel || "DEALER"}</div>
             <div className="uth-dealer-cards">
-              <PlayingCard card={{ r: 2, s: "s" }} faceDown small dealKey={dealKey} dealIndex={0} />
-              <PlayingCard card={{ r: 2, s: "s" }} faceDown small dealKey={dealKey} dealIndex={0} />
+              {(dealerCards || [{ r: 2, s: "s" }, { r: 2, s: "s" }]).map((c, i) => (
+                <PlayingCard
+                  key={`d-${dealKey}-${i}`}
+                  card={c}
+                  faceDown={!dealerCards || !dealerFaceUp}
+                  small
+                  dealKey={dealKey}
+                  dealIndex={0}
+                />
+              ))}
             </div>
             <div className="uth-dealer-btn">D</div>
           </div>
 
           <div className="uth-board" key={`board-${dealKey}`}>
             {board.map((c, i) => (
-              <PlayingCard
-                key={`b-${dealKey}-${i}`}
-                card={c}
-                dealKey={dealKey}
-                dealIndex={i}
-                highlight={revealResult}
-              />
+              i < shown ? (
+                <PlayingCard
+                  key={`b-${dealKey}-${i}`}
+                  card={c}
+                  dealKey={dealKey}
+                  dealIndex={i}
+                  highlight={revealResult}
+                />
+              ) : (
+                <PlayingCard key={`b-${dealKey}-${i}`} card={c} faceDown dealKey={dealKey} dealIndex={i} />
+              )
             ))}
           </div>
 
           <div className="uth-seat-zone">
             <div className="uth-betcircles">
-              <BetCircle label="Trips" />
-              <BetCircle label="Ante" chips />
-              <BetCircle label="Blind" chips />
-              <BetCircle label="Play" />
+              {bets ? (
+                <>
+                  <BetCircle label="Ante" amount={bets.ante} />
+                  <BetCircle label="Blind" amount={bets.blind} />
+                  <BetCircle label="Play" amount={bets.play} />
+                </>
+              ) : (
+                <>
+                  <BetCircle label="Trips" />
+                  <BetCircle label="Ante" chips />
+                  <BetCircle label="Blind" chips />
+                  <BetCircle label="Play" />
+                </>
+              )}
             </div>
             <div className="uth-player">
               <ChipStack />
@@ -1098,6 +1268,208 @@ function CardPalette({ manualUsed, onAssign }) {
 }
 
 // ===========================================================================
+//  PLAY VIEW  (full Ultimate Texas Hold'em with chips)
+// ===========================================================================
+const fmtChips = (n) => {
+  const r = Math.round(n * 10) / 10;
+  return Number.isInteger(r) ? String(r) : r.toFixed(1);
+};
+const fmtSigned = (n) => (n > 0 ? "+" : n < 0 ? "−" : "") + fmtChips(Math.abs(n));
+
+function PlayView({ chip, game, dealKey, totalChips, onSit, onDecide, onNextHand, onCashOut }) {
+  if (!chip) return <BuyIn totalChips={totalChips} onSit={onSit} />;
+  const { ante, buyIn, bankroll } = chip;
+  const session = bankroll - buyIn;
+  if (!game) return null;
+  const { street, playMult } = game;
+  const showdown = street === "showdown";
+  const boardShown = street === "preflop" ? 0 : street === "flop" ? 3 : 5;
+  const canDeal = bankroll >= 2 * ante;
+
+  return (
+    <div className="uth-view uth-view--play">
+      <div className="uth-main">
+        <div className="uth-pnl">
+          <PnL k="Bankroll" v={bankroll} />
+          <PnL k="Session" v={session} signed />
+          <PnL k="All-time" v={totalChips} signed />
+        </div>
+        <div className="uth-bets-row">
+          Ante <b>{ante}</b> &middot; Blind <b>{ante}</b> &middot; Play{" "}
+          <b>{playMult ? playMult * ante : "—"}</b>
+        </div>
+
+        <PokerTable
+          hole={game.playerHole}
+          board={game.board}
+          dealerCards={game.dealerHole}
+          dealerFaceUp={showdown}
+          boardShown={boardShown}
+          bets={{ ante, blind: ante, play: playMult * ante }}
+          dealKey={dealKey}
+          revealResult={showdown}
+        />
+
+        {showdown ? (
+          <PlayResult game={game} canDeal={canDeal} onNextHand={onNextHand} onCashOut={onCashOut} />
+        ) : (
+          <PlayControls street={street} ante={ante} bankroll={bankroll} onDecide={onDecide} onCashOut={onCashOut} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PnL({ k, v, signed }) {
+  const cls = signed && v > 0 ? "pos" : signed && v < 0 ? "neg" : "";
+  return (
+    <div className="uth-pnl-cell">
+      <span className="uth-pnl-k">{k}</span>
+      <span className={`uth-pnl-v ${cls}`}>{signed ? fmtSigned(v) : fmtChips(v)}</span>
+    </div>
+  );
+}
+
+function BuyIn({ totalChips, onSit }) {
+  const MIN = 50;
+  const [amt, setAmt] = useState(200);
+  const [ante, setAnte] = useState(5);
+  const valid = amt >= MIN && amt >= 2 * ante;
+  return (
+    <div className="uth-view uth-view--play">
+      <div className="uth-main">
+        <div className="uth-buyin">
+          <span className="uth-summary-kicker">Play &mdash; full Ultimate Texas Hold&rsquo;em</span>
+          <h2>Take a seat</h2>
+          <p>Play whole hands with real bets: raise <b>4×</b> or <b>3×</b> pre-flop,
+            <b> 2×</b> on the flop, then <b>1×</b> or fold on the river. Your chip
+            result and how closely you follow basic strategy both feed your stats.</p>
+          <label className="uth-buyin-row">
+            <span>Buy-in (min {MIN})</span>
+            <input
+              type="number" min={MIN} className="uth-gate-input uth-buyin-input"
+              value={amt}
+              onChange={(e) => setAmt(Math.max(0, parseInt(e.target.value || "0", 10)))}
+            />
+          </label>
+          <div className="uth-buyin-row">
+            <span>Ante per hand</span>
+            <div className="uth-ante-opts">
+              {[5, 10, 25].map((a) => (
+                <button key={a} className={`uth-key ${ante === a ? "uth-key--submit" : "uth-key--fn"}`} onClick={() => setAnte(a)}>{a}</button>
+              ))}
+            </div>
+          </div>
+          <button className="uth-key uth-key--submit" disabled={!valid} onClick={() => onSit(amt, ante)}>Sit down &rarr;</button>
+          <div className="uth-buyin-total">
+            All-time chips: <b className={totalChips > 0 ? "pos" : totalChips < 0 ? "neg" : ""}>{fmtSigned(totalChips)}</b>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlayControls({ street, ante, bankroll, onDecide, onCashOut }) {
+  const afford = (mult) => bankroll >= (2 + mult) * ante;
+  return (
+    <div className="uth-play-dock">
+      {street === "preflop" && (
+        <>
+          <div className="uth-play-street">Pre-flop &mdash; check, or raise</div>
+          <div className="uth-play-btns">
+            <button className="uth-key uth-play-check" onClick={() => onDecide("check")}>Check</button>
+            <button className="uth-key" disabled={!afford(3)} onClick={() => onDecide("3x")}>Bet 3× <small>{3 * ante}</small></button>
+            <button className="uth-key uth-key--submit" disabled={!afford(4)} onClick={() => onDecide("4x")}>Bet 4× <small>{4 * ante}</small></button>
+          </div>
+        </>
+      )}
+      {street === "flop" && (
+        <>
+          <div className="uth-play-street">Flop &mdash; check, or raise 2×</div>
+          <div className="uth-play-btns">
+            <button className="uth-key uth-play-check" onClick={() => onDecide("check")}>Check</button>
+            <button className="uth-key uth-key--submit" disabled={!afford(2)} onClick={() => onDecide("2x")}>Bet 2× <small>{2 * ante}</small></button>
+          </div>
+        </>
+      )}
+      {street === "river" && (
+        <>
+          <div className="uth-play-street">River &mdash; make the 1× bet, or fold</div>
+          <div className="uth-play-btns">
+            <button className="uth-key uth-play-fold" onClick={() => onDecide("fold")}>Fold</button>
+            <button className="uth-key uth-key--submit" disabled={!afford(1)} onClick={() => onDecide("1x")}>Bet 1× <small>{ante}</small></button>
+          </div>
+        </>
+      )}
+      <button className="uth-play-cashout" onClick={onCashOut}>Cash out</button>
+    </div>
+  );
+}
+
+function PlayResult({ game, canDeal, onNextHand, onCashOut }) {
+  const { settlement: s, playerLabel, dealerLabel } = game.result;
+  const outcome = s.folded ? "fold" : s.net > 0 ? "win" : s.net < 0 ? "loss" : "push";
+  const banner = s.folded
+    ? `Folded  ${fmtSigned(s.net)}`
+    : s.net > 0 ? `You win  ${fmtSigned(s.net)}`
+      : s.net < 0 ? `You lose  ${fmtSigned(s.net)}` : "Push";
+  return (
+    <div className="uth-result uth-play-result">
+      <div className={`uth-play-banner uth-play-banner--${outcome}`}>{banner}</div>
+
+      {!s.folded && (
+        <div className="uth-result-body">
+          <div className="uth-you-have">
+            <span className="uth-lbl">You</span><strong>{playerLabel}</strong>
+          </div>
+          <div className="uth-you-have">
+            <span className="uth-lbl">Dealer {s.dealerQualifies ? "" : "(no qualify)"}</span>
+            <strong>{dealerLabel}</strong>
+          </div>
+        </div>
+      )}
+
+      <div className="uth-play-bets">
+        <BetLine k="Ante" v={s.ante} />
+        <BetLine k="Blind" v={s.blind} />
+        <BetLine k="Play" v={s.play} />
+        <BetLine k="Net" v={s.net} total />
+      </div>
+
+      <div className="uth-play-strategy">
+        <span className="uth-lbl">Strategy {game.result.allCorrect ? "— all correct ✓" : "— misplay ✗"}</span>
+        <div className="uth-play-decisions">
+          {game.decisions.map((d, i) => (
+            <span key={i} className={`uth-play-dec ${d.correct ? "ok" : "bad"}`}>
+              {d.street}: {d.action}{d.correct ? " ✓" : ` ✗ → ${d.optimal}`}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="uth-play-actions">
+        {canDeal ? (
+          <button className="uth-key uth-key--submit uth-deal-next" onClick={onNextHand}>Deal next hand &rarr;</button>
+        ) : (
+          <div className="uth-play-broke">Not enough chips to post the ante — cash out to end the session.</div>
+        )}
+        <button className="uth-key uth-key--fn" onClick={onCashOut}>Cash out</button>
+      </div>
+    </div>
+  );
+}
+
+function BetLine({ k, v, total }) {
+  return (
+    <div className={`uth-bl ${total ? "uth-bl--total" : ""}`}>
+      <span>{k}</span>
+      <span className={v > 0 ? "pos" : v < 0 ? "neg" : "muted"}>{fmtSigned(v)}</span>
+    </div>
+  );
+}
+
+// ===========================================================================
 //  NAME GATE  (first visit — the name is stored forever in localStorage)
 // ===========================================================================
 function NameGate({ onSubmit }) {
@@ -1168,6 +1540,7 @@ function MetricsPage({ me, onBack }) {
         last24: (p.recentHands || []).filter((t) => now - t < DAY_MS).length,
         success: hands ? Math.round((100 * (p.correctAll || 0)) / hands) : 0,
         avgTimeMs: hands ? (p.timeSumAll || 0) / hands : 0,
+        chips: p.chipsNetAll || 0,
         lastHandTs: p.lastHandTs || 0,
       };
     });
@@ -1195,6 +1568,7 @@ function MetricsPage({ me, onBack }) {
     { key: "last24", label: "Hands (24h)", align: "right" },
     { key: "success", label: "Success %", align: "right" },
     { key: "avgTimeMs", label: "Avg time", align: "right" },
+    { key: "chips", label: "Net chips", align: "right" },
     { key: "lastHandTs", label: "Last hand", align: "right" },
   ];
 
@@ -1265,6 +1639,7 @@ function MetricsPage({ me, onBack }) {
                   <td className="uth-td uth-td--right">{r.last24}</td>
                   <td className="uth-td uth-td--right">{r.allTime ? `${r.success}%` : "–"}</td>
                   <td className="uth-td uth-td--right">{r.allTime ? fmtTime(r.avgTimeMs) : "–"}</td>
+                  <td className={`uth-td uth-td--right ${r.chips > 0 ? "pos" : r.chips < 0 ? "neg" : ""}`}>{r.chips ? fmtSigned(r.chips) : "0"}</td>
                   <td className="uth-td uth-td--right" title={r.lastHandTs ? new Date(r.lastHandTs).toLocaleString() : ""}>
                     {relTime(r.lastHandTs)}
                   </td>
@@ -1642,7 +2017,7 @@ html,body{margin:0;padding:0;background:#0b0d10}
 .uth-metrics-note--err{background:rgba(239,91,100,.08);border-color:rgba(239,91,100,.35);color:var(--bad)}
 .uth-metrics-totals{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .uth-table-wrap2{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
-.uth-table{width:100%;border-collapse:collapse;font-size:14px;min-width:600px}
+.uth-table{width:100%;border-collapse:collapse;font-size:14px;min-width:680px}
 .uth-th{padding:11px 14px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);background:rgba(0,0,0,.25);cursor:pointer;user-select:none;white-space:nowrap;border-bottom:1px solid var(--line)}
 .uth-th:hover{color:var(--txt)}
 .uth-th.is-sorted{color:var(--gold)}
@@ -1655,6 +2030,65 @@ html,body{margin:0;padding:0;background:#0b0d10}
 .uth-table tbody tr.is-me{background:rgba(231,198,90,.08)}
 .uth-you-tag{margin-left:8px;font-size:10px;font-weight:800;color:var(--gold);background:rgba(231,198,90,.15);padding:1px 7px;border-radius:999px;text-transform:uppercase;letter-spacing:.4px}
 .uth-td-empty{padding:22px;text-align:center;color:var(--muted)}
+
+/* ---------- play (chips) mode ---------- */
+.pos{color:var(--ok)} .neg{color:var(--bad)} .muted{color:var(--muted)}
+.uth-view--play{display:block}
+.uth-view--play .uth-main{min-width:0;max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+/* the play felt carries dealer + board + hole cards, so give it more height */
+.uth-view--play .uth-rail{max-width:520px;aspect-ratio:16/11.4}
+.uth-view--play .uth-dealer-zone{top:5%}
+.uth-view--play .uth-board{top:43%}
+.uth-view--play .uth-seat-zone{bottom:4%}
+.uth-pnl{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.uth-pnl-cell{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:11px;padding:8px 10px;display:flex;flex-direction:column;gap:1px;text-align:center}
+.uth-pnl-k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.uth-pnl-v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+.uth-bets-row{text-align:center;font-size:12px;color:var(--muted);letter-spacing:.3px}
+.uth-bets-row b{color:var(--gold);font-variant-numeric:tabular-nums}
+.uth-betcircle.is-bet{border-style:solid;border-color:rgba(231,198,90,.7);background:radial-gradient(circle at 50% 35%,rgba(231,198,90,.22),rgba(0,0,0,.3))}
+.uth-betcircle-amt{font-size:clamp(9px,1.8vw,13px);color:var(--gold);font-weight:800;margin-top:1px}
+/* controls */
+.uth-play-dock{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.uth-play-street{text-align:center;font-size:13px;color:var(--muted);font-weight:600}
+.uth-play-btns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.uth-play-btns .uth-key{flex:1;min-width:96px;font-size:15px;display:flex;flex-direction:column;align-items:center;gap:1px;padding:10px 8px}
+.uth-play-btns .uth-key small{font-size:11px;opacity:.8;font-weight:600}
+.uth-play-check{background:linear-gradient(180deg,#2a3646,#1e2732)}
+.uth-play-fold{background:linear-gradient(180deg,#3a2530,#2a1a22);color:var(--bad)}
+.uth-play-cashout{background:transparent;border:0;color:var(--muted);font-size:12px;cursor:pointer;padding:2px;text-decoration:underline}
+.uth-play-cashout:hover{color:var(--txt)}
+/* result */
+.uth-play-banner{border-radius:12px;padding:12px;text-align:center;font-size:22px;font-weight:800;letter-spacing:.3px}
+.uth-play-banner--win{color:var(--ok);background:radial-gradient(120% 140% at 50% 0%,rgba(62,207,142,.18),rgba(0,0,0,0));box-shadow:inset 0 0 0 1px rgba(62,207,142,.5)}
+.uth-play-banner--loss{color:var(--bad);background:radial-gradient(120% 140% at 50% 0%,rgba(239,91,100,.16),rgba(0,0,0,0));box-shadow:inset 0 0 0 1px rgba(239,91,100,.5)}
+.uth-play-banner--fold{color:var(--bad);background:rgba(239,91,100,.08);box-shadow:inset 0 0 0 1px rgba(239,91,100,.35)}
+.uth-play-banner--push{color:var(--muted);background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px var(--line)}
+.uth-play-bets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:11px;padding:10px}
+.uth-bl{display:flex;flex-direction:column;gap:1px;text-align:center;font-variant-numeric:tabular-nums}
+.uth-bl span:first-child{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.uth-bl span:last-child{font-size:16px;font-weight:800}
+.uth-bl--total{border-left:1px solid var(--line)}
+.uth-play-strategy{background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:11px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.uth-play-decisions{display:flex;flex-wrap:wrap;gap:6px}
+.uth-play-dec{font-size:11px;padding:3px 8px;border-radius:999px;font-weight:600;text-transform:capitalize}
+.uth-play-dec.ok{color:var(--ok);background:rgba(62,207,142,.12)}
+.uth-play-dec.bad{color:var(--bad);background:rgba(239,91,100,.14)}
+.uth-play-actions{display:flex;flex-direction:column;gap:8px}
+.uth-play-broke{font-size:13px;color:var(--warn);text-align:center;padding:6px}
+/* buy-in */
+.uth-buyin{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:12px;text-align:center}
+.uth-buyin h2{margin:2px 0 0;font-size:22px}
+.uth-buyin p{margin:0;font-size:13px;color:var(--muted);line-height:1.55}
+.uth-buyin p b{color:var(--txt)}
+.uth-buyin-row{display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;font-size:14px;color:var(--muted)}
+.uth-buyin-input{max-width:130px;text-align:right}
+.uth-ante-opts{display:flex;gap:6px}
+.uth-ante-opts .uth-key{padding:8px 14px;font-size:14px}
+.uth-buyin-total{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:10px}
+.uth-buyin-total b{font-variant-numeric:tabular-nums}
+.uth-modes-play{color:var(--ok) !important}
+.uth-modes-play.is-active{background:linear-gradient(160deg,#3ecf8e,#2a9d6a) !important;color:#06160f !important}
 
 /* ---------- responsive ---------- */
 /* Desktop: float the session stats as a compact HUD in the top-right so the
