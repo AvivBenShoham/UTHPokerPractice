@@ -421,7 +421,7 @@ function fmtTime(ms) {
 }
 
 export default function UTHOutsTrainer() {
-  const [mode, setMode] = useState("practice"); // 'practice' | 'manual' | 'metrics'
+  const [mode, setMode] = useState("play"); // 'play' | 'practice' | 'manual' | 'metrics'
 
   // player profile (name lives forever in localStorage)
   const [profile, setProfile] = useState(() => loadProfile());
