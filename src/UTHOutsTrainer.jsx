@@ -273,6 +273,45 @@ function flopRaise2x(hole, flop) {
   }
   return false;
 }
+// Plain-language reason the optimal move on `street` is what it is — shown when
+// the player's decision disagrees, so they learn WHY, not just WHAT.
+const HAND_LABEL = { 14: "A", 13: "K", 12: "Q", 11: "J", 10: "10" };
+function handTag(hole) {
+  const hi = Math.max(hole[0].r, hole[1].r);
+  const lo = Math.min(hole[0].r, hole[1].r);
+  const L = (r) => HAND_LABEL[r] || String(r);
+  if (hi === lo) return `${L(hi)}${L(lo)} (pocket pair)`;
+  const suited = hole[0].s === hole[1].s ? "suited" : "offsuit";
+  return `${L(hi)}${L(lo)} ${suited}`;
+}
+function explainDecision(street, hole, board) {
+  if (street === "preflop") {
+    const raise = preflopRaise4x(hole);
+    const hi = Math.max(hole[0].r, hole[1].r), lo = Math.min(hole[0].r, hole[1].r);
+    const suited = hole[0].s === hole[1].s;
+    let rule;
+    if (hi === lo) rule = hi >= 3 ? "pairs 33+ raise 4×" : "22 is the only pair that checks";
+    else if (hi === 14) rule = "any ace raises 4×";
+    else if (hi === 13) rule = suited ? "suited kings raise 4×" : "offsuit kings need K5+";
+    else if (hi === 12) rule = suited ? "suited queens need Q6+" : "offsuit queens need Q8+";
+    else if (hi === 11) rule = suited ? "suited jacks need J8+" : "offsuit jacks need JT";
+    else rule = "10-high and below only raise as a pair";
+    return `${handTag(hole)} — ${rule}, so ${raise ? "raise 4×" : "check"}.`;
+  }
+  if (street === "flop") {
+    const flop = board.slice(0, 3);
+    const raise = flopRaise2x(hole, flop);
+    if (!raise) return "No two pair+, hidden pair, or 4-flush with a 10+ of that suit — so check.";
+    if (score5([...hole, ...flop])[0] >= CAT.TWO_PAIR) return "You've made two pair or better — raise 2×.";
+    if (hole[0].r === hole[1].r) return "Your pocket pair is a hidden pair — raise 2×.";
+    if (hole.some((c) => flop.some((b) => b.r === c.r))) return "A hole card pairs the board (hidden pair) — raise 2×.";
+    return "Four to a flush with a 10+ of that suit in hand — raise 2×.";
+  }
+  const outs = countOuts(hole, board).total;
+  return outs >= 21
+    ? `${outs} dealer outs beat you (21 or more) — fold.`
+    : `Only ${outs} dealer outs beat you (20 or fewer) — make the 1× bet.`;
+}
 // Blind bet pay table — multiplier applied when the player WINS with this hand.
 function blindMult(score) {
   switch (score[0]) {
@@ -524,7 +563,11 @@ export default function UTHOutsTrainer() {
       if (action === "fold") { folded = true; showdown = true; }
       else { playMult = 1; showdown = true; }
     }
-    const decisions = [...game.decisions, { street, action, optimal, correct: action === optimal }];
+    const correct = action === optimal;
+    const decisions = [...game.decisions, {
+      street, action, optimal, correct,
+      why: correct ? null : explainDecision(street, playerHole, board),
+    }];
     if (!showdown) { setGame({ ...game, decisions, street: nextStreet }); return; }
 
     const playerBest = bestScore([...playerHole, ...board]);
@@ -1451,6 +1494,15 @@ function PlayResult({ game, canDeal, onNextHand, onCashOut }) {
             </span>
           ))}
         </div>
+        {game.decisions.some((d) => !d.correct) && (
+          <ul className="uth-play-mistakes">
+            {game.decisions.filter((d) => !d.correct).map((d, i) => (
+              <li key={i}>
+                <b className="cap">{d.street}</b>: you {d.action === "check" ? "checked" : d.action === "fold" ? "folded" : `bet ${d.action}`}, correct was <b>{d.optimal === "check" ? "check" : d.optimal === "fold" ? "fold" : d.optimal}</b>. {d.why}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="uth-play-actions">
@@ -2219,6 +2271,10 @@ html,body{margin:0;padding:0;background:#0b0d10}
 .uth-play-dec{font-size:11px;padding:3px 8px;border-radius:999px;font-weight:600;text-transform:capitalize}
 .uth-play-dec.ok{color:var(--ok);background:rgba(62,207,142,.12)}
 .uth-play-dec.bad{color:var(--bad);background:rgba(239,91,100,.14)}
+.uth-play-mistakes{list-style:none;margin:2px 0 0;padding:8px 10px;display:flex;flex-direction:column;gap:6px;background:rgba(239,91,100,.07);border:1px solid rgba(239,91,100,.28);border-radius:9px}
+.uth-play-mistakes li{font-size:12px;line-height:1.4;color:var(--txt)}
+.uth-play-mistakes b{color:var(--txt)}
+.uth-play-mistakes b.cap{text-transform:capitalize;color:var(--bad)}
 .uth-play-actions{display:flex;flex-direction:column;gap:8px}
 .uth-play-broke{font-size:13px;color:var(--warn);text-align:center;padding:6px}
 /* buy-in */
