@@ -27,6 +27,13 @@ export const DAY_MS = 24 * 60 * 60 * 1000;
 const PKEY = "uth:profile:v1";
 const nodeUrl = (path) => `${FIREBASE.databaseURL}/${path}.json`;
 
+// Local calendar day key "YYYY-MM-DD" for grouping the daily-progress history.
+export function dayKey(ts = Date.now()) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 const uuid = () =>
   typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
@@ -53,28 +60,47 @@ export function createProfile(name) {
     lastHandTs: 0,
     recentHands: [], // timestamps within the last 24h
     timeSumAll: 0, // total decision time (ms) across all hands
-    correctAll: 0, // hands played with correct strategy
+    correctAll: 0, // hands played correctly (right side / right strategy)
     chipsNetAll: 0, // lifetime chip profit/loss from the Play (chips) mode
+    daily: {},     // "YYYY-MM-DD" -> { hands, correct, exact, exactTimeMs }
   };
   saveProfile(p);
   return p;
 }
 
 // Record one completed hand: update local storage + push to the database.
-// `outcome` = { correct: boolean, timeMs: number, chipsNet: number } (chipsNet
-// only for the chips game mode).
+// `outcome` = { correct, exact, timeMs, chipsNet } for the just-decided hand
+// (exact only in outs practice; chipsNet only in the chips Play mode).
 export function recordHand(profile, outcome = {}) {
   if (!profile) return profile;
   const now = Date.now();
+  const timeMs = Number(outcome.timeMs) || 0;
+  const correct = outcome.correct ? 1 : 0;
+  const exact = outcome.exact ? 1 : 0;
   const recentHands = [...(profile.recentHands || []), now].filter((t) => now - t < DAY_MS);
+
+  // roll today's bucket in the daily-progress history
+  const key = dayKey(now);
+  const prevDay = (profile.daily || {})[key] || { hands: 0, correct: 0, exact: 0, exactTimeMs: 0 };
+  const daily = {
+    ...(profile.daily || {}),
+    [key]: {
+      hands: prevDay.hands + 1,
+      correct: prevDay.correct + correct,
+      exact: prevDay.exact + exact,
+      exactTimeMs: prevDay.exactTimeMs + (exact ? timeMs : 0),
+    },
+  };
+
   const next = {
     ...profile,
     handsAllTime: (profile.handsAllTime || 0) + 1,
     lastHandTs: now,
     recentHands,
-    timeSumAll: (profile.timeSumAll || 0) + (Number(outcome.timeMs) || 0),
-    correctAll: (profile.correctAll || 0) + (outcome.correct ? 1 : 0),
+    timeSumAll: (profile.timeSumAll || 0) + timeMs,
+    correctAll: (profile.correctAll || 0) + correct,
     chipsNetAll: (profile.chipsNetAll || 0) + (Number(outcome.chipsNet) || 0),
+    daily,
   };
   saveProfile(next);
   pushPlayer(next); // fire-and-forget
@@ -101,6 +127,7 @@ async function pushPlayer(p) {
         timeSumAll: p.timeSumAll || 0,
         correctAll: p.correctAll || 0,
         chipsNetAll: p.chipsNetAll || 0,
+        daily: p.daily || {},
       }),
     });
   } catch { /* offline / rules — ignore */ }
@@ -124,5 +151,6 @@ export async function fetchAllPlayers() {
     timeSumAll: Number(v?.timeSumAll || 0),
     correctAll: Number(v?.correctAll || 0),
     chipsNetAll: Number(v?.chipsNetAll || 0),
+    daily: v?.daily || {},
   }));
 }

@@ -474,7 +474,7 @@ export default function UTHOutsTrainer() {
       timeSum: d.timeSum + dMs,
       points: d.points + earned,
     }));
-    if (profile) setProfile(recordHand(profile, { correct: correctSide, timeMs: dMs }));
+    if (profile) setProfile(recordHand(profile, { correct: correctSide, exact: bucket === "exact", timeMs: dMs }));
   }, [guess, truth, result, drillDone, handStart, profile]);
 
   const finishDrill = useCallback(() => setDrillDone(true), []);
@@ -1563,13 +1563,13 @@ function MetricsPage({ me, onBack }) {
   const arrow = (key) => (sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "");
 
   const cols = [
-    { key: "name", label: "Player", align: "left" },
-    { key: "allTime", label: "Hands (all-time)", align: "right" },
-    { key: "last24", label: "Hands (24h)", align: "right" },
-    { key: "success", label: "Success %", align: "right" },
-    { key: "avgTimeMs", label: "Avg time", align: "right" },
-    { key: "chips", label: "Net chips", align: "right" },
-    { key: "lastHandTs", label: "Last hand", align: "right" },
+    { key: "name", label: "Player", short: "Player", align: "left" },
+    { key: "allTime", label: "Hands (all-time)", short: "All", align: "right" },
+    { key: "last24", label: "Hands (24h)", short: "24h", align: "right" },
+    { key: "success", label: "Success %", short: "Win%", align: "right" },
+    { key: "avgTimeMs", label: "Avg time", short: "Time", align: "right" },
+    { key: "chips", label: "Net chips", short: "Chips", align: "right" },
+    { key: "lastHandTs", label: "Last hand", short: "Last", align: "right" },
   ];
 
   return (
@@ -1619,7 +1619,9 @@ function MetricsPage({ me, onBack }) {
                   className={`uth-th uth-th--${c.align} ${sortKey === c.key ? "is-sorted" : ""}`}
                   onClick={() => sortOn(c.key)}
                 >
-                  {c.label}{arrow(c.key)}
+                  <span className="uth-th-full">{c.label}</span>
+                  <span className="uth-th-short">{c.short}</span>
+                  {arrow(c.key)}
                 </th>
               ))}
             </tr>
@@ -1649,6 +1651,129 @@ function MetricsPage({ me, onBack }) {
           </tbody>
         </table>
       </div>
+
+      <DailyProgress me={me} />
+    </div>
+  );
+}
+
+// ===========================================================================
+//  DAILY PROGRESS  (personal — this device's calendar-day history)
+// ===========================================================================
+function LineChart({ series, yMax, yFmt, color }) {
+  const W = 320, H = 130, padL = 40, padR = 12, padT = 12, padB = 26;
+  const n = series.length;
+  const max = yMax > 0 ? yMax : 1;
+  const xAt = (i) => (n <= 1 ? padL + (W - padL - padR) / 2 : padL + (i * (W - padL - padR)) / (n - 1));
+  const yAt = (v) => H - padB - (Math.max(0, Math.min(v, max)) / max) * (H - padT - padB);
+  const pts = series.map((s, i) => ({ ...s, cx: xAt(i), cy: yAt(s.value) }));
+  const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.cx.toFixed(1)},${p.cy.toFixed(1)}`).join(" ");
+  const ticks = [0, max / 2, max];
+  const step = Math.max(1, Math.ceil(n / 4)); // at most ~4 x labels
+  return (
+    <svg className="uth-chart" viewBox={`0 0 ${W} ${H}`} role="img" preserveAspectRatio="none">
+      {ticks.map((t, i) => {
+        const y = yAt(t);
+        return (
+          <g key={i}>
+            <line x1={padL} y1={y} x2={W - padR} y2={y} className="uth-chart-grid" />
+            <text x={padL - 6} y={y + 3} className="uth-chart-ylab" textAnchor="end">{yFmt(t)}</text>
+          </g>
+        );
+      })}
+      {n > 1 && <path d={path} className="uth-chart-line" style={{ stroke: color }} fill="none" />}
+      {pts.map((p, i) => (
+        <g key={i}>
+          <circle cx={p.cx} cy={p.cy} r={3} className="uth-chart-dot" style={{ fill: color }}>
+            <title>{`${p.label}: ${yFmt(p.value)} (${p.hands} hands)`}</title>
+          </circle>
+          {(i % step === 0 || i === n - 1) && (
+            <text x={p.cx} y={H - 8} className="uth-chart-xlab" textAnchor="middle">{p.short}</text>
+          )}
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function DailyProgress({ me }) {
+  const days = useMemo(() => {
+    const daily = me?.daily || {};
+    return Object.keys(daily).sort().map((k) => {
+      const d = daily[k] || {};
+      const hands = d.hands || 0;
+      const [, mo, da] = k.split("-");
+      return {
+        key: k,
+        short: `${mo}/${da}`,
+        hands,
+        successPct: hands ? (d.correct / hands) * 100 : 0,
+        exactPct: hands ? (d.exact / hands) * 100 : 0,
+        avgExactMs: d.exact ? d.exactTimeMs / d.exact : 0,
+      };
+    });
+  }, [me]);
+
+  const maxExactMs = Math.max(1000, ...days.map((d) => d.avgExactMs));
+
+  return (
+    <div className="uth-daily">
+      <div className="uth-daily-head">
+        <span className="uth-summary-kicker">Your progress · this device</span>
+        <h3>Daily progress</h3>
+      </div>
+
+      {days.length === 0 ? (
+        <div className="uth-td-empty">Play some hands to start tracking your daily progress.</div>
+      ) : (
+        <>
+          <div className="uth-charts">
+            <div className="uth-chart-card">
+              <div className="uth-chart-title"><span className="uth-dot" style={{ background: "var(--ok)" }} />Correct decision rate</div>
+              <LineChart
+                series={days.map((d) => ({ label: d.key, short: d.short, value: d.successPct, hands: d.hands }))}
+                yMax={100}
+                yFmt={(v) => `${Math.round(v)}%`}
+                color="var(--ok)"
+              />
+            </div>
+            <div className="uth-chart-card">
+              <div className="uth-chart-title"><span className="uth-dot" style={{ background: "var(--accent)" }} />Avg time on exact guesses</div>
+              <LineChart
+                series={days.map((d) => ({ label: d.key, short: d.short, value: d.avgExactMs, hands: d.hands }))}
+                yMax={maxExactMs}
+                yFmt={(v) => fmtTime(v)}
+                color="var(--accent)"
+              />
+            </div>
+          </div>
+
+          <div className="uth-table-wrap2">
+            <table className="uth-table uth-table--daily">
+              <thead>
+                <tr>
+                  <th className="uth-th uth-th--left">Day</th>
+                  <th className="uth-th uth-th--right">Hands</th>
+                  <th className="uth-th uth-th--right">Success</th>
+                  <th className="uth-th uth-th--right">Exact</th>
+                  <th className="uth-th uth-th--right">Avg exact</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...days].reverse().map((d) => (
+                  <tr key={d.key}>
+                    <td className="uth-td uth-td--left">{d.short}</td>
+                    <td className="uth-td uth-td--right">{d.hands}</td>
+                    <td className="uth-td uth-td--right">{Math.round(d.successPct)}%</td>
+                    <td className="uth-td uth-td--right">{Math.round(d.exactPct)}%</td>
+                    <td className="uth-td uth-td--right">{d.avgExactMs > 0 ? fmtTime(d.avgExactMs) : "–"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -2030,6 +2155,21 @@ html,body{margin:0;padding:0;background:#0b0d10}
 .uth-table tbody tr.is-me{background:rgba(231,198,90,.08)}
 .uth-you-tag{margin-left:8px;font-size:10px;font-weight:800;color:var(--gold);background:rgba(231,198,90,.15);padding:1px 7px;border-radius:999px;text-transform:uppercase;letter-spacing:.4px}
 .uth-td-empty{padding:22px;text-align:center;color:var(--muted)}
+.uth-th-short{display:none}
+
+/* ---------- daily progress ---------- */
+.uth-daily{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);padding-top:14px}
+.uth-daily-head h3{margin:2px 0 0;font-size:18px}
+.uth-charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.uth-chart-card{background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:12px;padding:10px 12px 4px}
+.uth-chart-title{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:4px}
+.uth-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
+.uth-chart{width:100%;height:auto;display:block;overflow:visible}
+.uth-chart-grid{stroke:rgba(255,255,255,.08);stroke-width:1}
+.uth-chart-ylab{fill:var(--muted);font-size:9px;font-variant-numeric:tabular-nums}
+.uth-chart-xlab{fill:var(--muted);font-size:9px;font-variant-numeric:tabular-nums}
+.uth-chart-line{stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.uth-chart-dot{stroke:var(--panel);stroke-width:1.5}
 
 /* ---------- play (chips) mode ---------- */
 .pos{color:var(--ok)} .neg{color:var(--bad)} .muted{color:var(--muted)}
@@ -2160,6 +2300,25 @@ html,body{margin:0;padding:0;background:#0b0d10}
   .uth-betcircles{display:none}
   .uth-view--practice .uth-main:not(.uth-main--result) .uth-board{top:45%}
   .uth-view--practice .uth-main:not(.uth-main--result) .uth-seat-zone{bottom:9%}
+  /* ---- metrics page fits an iPhone without horizontal scroll ---- */
+  .uth-metrics{padding:12px;gap:11px}
+  .uth-metrics-head h2{font-size:19px}
+  .uth-metrics-totals{grid-template-columns:1fr 1fr;gap:7px}
+  .uth-summary-hero{padding:10px}
+  .uth-summary-hero-v{font-size:30px}
+  .uth-summary-hero-k{font-size:11px}
+  /* short headers + tight cells so all six columns fit ~360px */
+  .uth-th-full{display:none}
+  .uth-th-short{display:inline}
+  .uth-table{min-width:0;font-size:12px;table-layout:fixed}
+  .uth-th{padding:8px 6px;font-size:10px;letter-spacing:.2px}
+  .uth-td{padding:8px 6px}
+  .uth-td--left{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .uth-you-tag{margin-left:4px}
+  /* daily charts stack on phones */
+  .uth-charts{grid-template-columns:1fr}
+  .uth-daily-head h3{font-size:16px}
+  .uth-table--daily{font-size:12px}
 }
 @media(max-width:420px){
   .uth-app{padding:10px;gap:8px}
