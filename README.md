@@ -35,7 +35,13 @@ their device. Every completed hand updates their profile. **Everyone** sees a
 the last 24h* and *players all-time*, plus a **sortable table** (click any
 column) of each player's name, all-time hands, last-24h hands, **success %**
 (share of correct bet/fold decisions), **avg time per hand**, and last-hand
-time. Your own row is highlighted.
+time. Your own row is highlighted. The whole page is laid out to fit a phone
+screen without horizontal scrolling.
+
+Below the leaderboard, a **Daily progress** section (personal, from this
+device's history) charts your day-by-day **correct-decision rate** and **average
+time on exact guesses**, with a per-day table of hands, success %, exact %, and
+average exact-guess time.
 
 Because GitHub Pages is static and `localStorage` is per-device, cross-player
 aggregation uses a shared **Firebase Realtime Database** over its REST API (no
