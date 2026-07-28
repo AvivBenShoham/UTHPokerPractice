@@ -21,6 +21,31 @@ ok("33 raise", preflopRaise4x(H("3h 3d")));
 ok("22 check", !preflopRaise4x(H("2h 2d")));
 ok("72o check", !preflopRaise4x(H("7h 2d")));
 
+// Full 169-hand lock against the Wizard-of-Odds "4X Raise" chart. `expected`
+// encodes the chart image cell-by-cell (independent of preflopRaise4x's own
+// branch structure), so every hand class must agree.
+function chartRaise(hi, lo, suited) {
+  if (hi === lo) return hi >= 3;          // pairs: 33+ raise, 22 check
+  if (hi === 14) return true;             // A-row: raise everything
+  if (hi === 13) return suited || lo >= 5; // K: suited all; offsuit K5+
+  if (hi === 12) return lo >= (suited ? 6 : 8); // Q: suited Q6+; offsuit Q8+
+  if (hi === 11) return lo >= (suited ? 8 : 10); // J: suited J8+; offsuit JT
+  return false;                           // T-high and below: only pairs (above)
+}
+let matrixMismatch = 0;
+const SU = ["s", "h"];
+for (let a = 2; a <= 14; a++) {
+  for (let b = 2; b <= 14; b++) {
+    const hi = Math.max(a, b), lo = Math.min(a, b);
+    for (const suited of [true, false]) {
+      if (a === b && !suited) continue; // pairs can't be suited-vs-offsuit twice
+      const hole = [{ r: a, s: "s" }, { r: b, s: suited ? "s" : "h" }];
+      if (preflopRaise4x(hole) !== chartRaise(hi, lo, suited)) matrixMismatch++;
+    }
+  }
+}
+ok("full 169-hand 4X matrix matches chart", matrixMismatch === 0);
+
 // flop
 ok("flop pocket pair raise", flopRaise2x(H("9h 9d"), H("2s 7c Kd")));
 ok("flop hole pairs board", flopRaise2x(H("Kh 4d"), H("Ks 7c 2d")));

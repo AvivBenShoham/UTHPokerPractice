@@ -242,6 +242,11 @@ function dealFullHand() {
 //  Verified against the Wizard of Odds tables. See test coverage in scratch.
 // ===========================================================================
 // Pre-flop: raise 4x, else check. (3x is legal but never optimal.)
+// This reproduces the Wizard-of-Odds "4X Raise" chart EXACTLY:
+//   • any pair 33+           • any ace (Ax)
+//   • K: suited any, offsuit K5+   • Q: suited Q6+, offsuit Q8+
+//   • J: suited J8+, offsuit JT    • 10-high and below: never raise
+// (Locked by the full 169-hand matrix test in test/game.test.mjs.)
 function preflopRaise4x(hole) {
   const hi = Math.max(hole[0].r, hole[1].r);
   const lo = Math.min(hole[0].r, hole[1].r);
@@ -683,17 +688,17 @@ export default function UTHOutsTrainer() {
             ♠ Play
           </button>
           <button
-            className={mode === "manual" ? "is-active" : ""}
-            onClick={() => setMode("manual")}
-          >
-            Manual
-          </button>
-          <button
             className={`uth-modes-metrics ${mode === "metrics" ? "is-active" : ""}`}
             onClick={() => setMode("metrics")}
             title="Player leaderboard"
           >
             📊 Metrics
+          </button>
+          <button
+            className={mode === "manual" ? "is-active" : ""}
+            onClick={() => setMode("manual")}
+          >
+            Manual
           </button>
           {profile && <span className="uth-whoami" title="Your name (saved on this device)">{profile.name}</span>}
         </nav>
@@ -1332,7 +1337,7 @@ function PnL({ k, v, signed }) {
 
 function BuyIn({ totalChips, onSit }) {
   const MIN = 50;
-  const [amt, setAmt] = useState(200);
+  const [amt, setAmt] = useState(300);
   const [ante, setAnte] = useState(5);
   const valid = amt >= MIN && amt >= 2 * ante;
   return (
@@ -1355,7 +1360,7 @@ function BuyIn({ totalChips, onSit }) {
           <div className="uth-buyin-row">
             <span>Ante per hand</span>
             <div className="uth-ante-opts">
-              {[5, 10, 25].map((a) => (
+              {[5, 10, 25, 50].map((a) => (
                 <button key={a} className={`uth-key ${ante === a ? "uth-key--submit" : "uth-key--fn"}`} onClick={() => setAnte(a)}>{a}</button>
               ))}
             </div>
